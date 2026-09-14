@@ -1,5 +1,15 @@
-node_modules
-.next
-.env
-.env.local
-.vercel
+# Dependencies and build output
+node_modules/
+.next/
+out/
+coverage/
+
+# Local configuration and secrets
+.env*
+!.env.example
+.vercel/
+
+# Logs and operating-system files
+*.log
+.DS_Store
+Thumbs.db

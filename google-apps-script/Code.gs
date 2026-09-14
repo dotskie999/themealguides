@@ -34,13 +34,13 @@ function getRestaurants() {
 
 function getMenu(restaurantId) {
   if (!restaurantId) throw new Error('restaurant_id is required');
-  const items = getSheetDataAsObjects('MenuItems').filter(i => i.restaurant_id === restaurantId && String(i.active).toLowerCase() === 'yes');
+  const items = getSheetDataAsObjects('MenuItems').filter(i => String(i.restaurant_id) === String(restaurantId) && String(i.active).toLowerCase() === 'yes');
   const groups = getSheetDataAsObjects('OptionGroups');
   const options = getSheetDataAsObjects('Options');
   return items.map(item => ({ ...item, option_groups: groups.filter(g =>
-    (g.category_id && item.category_id && g.category_id === item.category_id) ||
-    (!g.category_id && g.item_id === item.item_id)
-  ).sort(sortRows).map(group => ({ ...group, options: options.filter(o => o.group_id === group.group_id).sort(sortRows) })) }));
+    (g.category_id && item.category_id && String(g.category_id) === String(item.category_id)) ||
+    (!g.category_id && String(g.item_id) === String(item.item_id))
+  ).sort(sortRows).map(group => ({ ...group, options: options.filter(o => String(o.group_id) === String(group.group_id)).sort(sortRows) })) }));
 }
 
 function getAdminData() {
@@ -123,16 +123,78 @@ function submitOrder(payload) {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const counterSheet = ss.getSheetByName('Order_Counter');
+    const ordersSheet = ss.getSheetByName('Orders');
+    if (!counterSheet || !ordersSheet) throw new Error('Order sheets are not configured.');
+    const clean = validateOrder(payload);
     const counterData = counterSheet.getDataRange().getValues();
     let currentNumber = 1000, rowIndex = -1;
     for (let i = 1; i < counterData.length; i++) if (counterData[i][1] === 'order_sequence') { currentNumber = parseInt(counterData[i][2], 10); rowIndex = i + 1; break; }
+    if (!Number.isFinite(currentNumber)) currentNumber = 1000;
+    if (rowIndex < 0) {
+      const existingNumbers = ordersSheet.getDataRange().getValues().slice(1).map(row => parseInt(row[0], 10)).filter(Number.isFinite);
+      if (existingNumbers.length) currentNumber = Math.max(currentNumber, ...existingNumbers);
+    }
     const newOrderNumber = currentNumber + 1;
     if (rowIndex > -1) counterSheet.getRange(rowIndex, 3).setValue(newOrderNumber);
+    else counterSheet.appendRow(['', 'order_sequence', newOrderNumber]);
     const formatted = String(newOrderNumber).padStart(4, '0');
     const timestamp = new Date().toISOString();
-    ss.getSheetByName('Orders').appendRow([formatted,payload.restaurant_id||'',JSON.stringify(payload.items||[]),payload.subtotal||0,payload.customer_name||'',payload.customer_email||'',payload.contact_number||'',payload.city||'',payload.barangay||'',payload.house_number||'',payload.landmark||'',payload.order_remarks||'','pending',timestamp]);
+    ordersSheet.appendRow([formatted,clean.restaurant_id,JSON.stringify(clean.items),clean.subtotal,clean.customer_name,'',clean.contact_number,clean.city,clean.barangay,clean.house_number,'',clean.order_remarks,'pending',timestamp]);
     return { order_number: formatted, status: 'pending', timestamp: timestamp };
   } finally { lock.releaseLock(); }
+}
+
+function validateOrder(payload) {
+  if (!payload || typeof payload !== 'object') throw new Error('Order details are required.');
+  const restaurantId = String(payload.restaurant_id || '').trim();
+  const restaurant = getSheetDataAsObjects('Restaurants').find(row => String(row.restaurant_id) === restaurantId && String(row.active).toLowerCase() === 'yes');
+  if (!restaurant) throw new Error('Restaurant is not available.');
+  if (!Array.isArray(payload.items) || payload.items.length < 1 || payload.items.length > 50) throw new Error('Order must contain between 1 and 50 items.');
+
+  const menuItems = getSheetDataAsObjects('MenuItems');
+  const groups = getSheetDataAsObjects('OptionGroups');
+  const options = getSheetDataAsObjects('Options');
+  let subtotal = 0;
+  const items = payload.items.map(input => {
+    const menuItem = menuItems.find(row => String(row.item_id) === String(input.item_id) && String(row.restaurant_id) === restaurantId && String(row.active).toLowerCase() === 'yes');
+    if (!menuItem) throw new Error('One of the selected menu items is unavailable.');
+    const quantity = Number(input.quantity);
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99) throw new Error('Item quantity must be between 1 and 99.');
+    const itemGroups = groups.filter(group =>
+      (group.category_id && menuItem.category_id && String(group.category_id) === String(menuItem.category_id)) ||
+      (!group.category_id && String(group.item_id) === String(menuItem.item_id))
+    );
+    const suppliedOptions = Array.isArray(input.selected_options) ? input.selected_options : [];
+    const seen = {};
+    const selectedOptions = suppliedOptions.map(supplied => {
+      const option = options.find(row => String(row.option_id) === String(supplied.option_id));
+      if (!option || !itemGroups.some(group => String(group.group_id) === String(option.group_id))) throw new Error('One of the selected add-ons is unavailable.');
+      if (seen[option.option_id]) throw new Error('The same add-on cannot be selected twice.');
+      seen[option.option_id] = true;
+      return { option_id: option.option_id, group_id: option.group_id, option_name: option.option_name, price: Number(option.price || 0) };
+    });
+    itemGroups.forEach(group => {
+      const count = selectedOptions.filter(option => String(option.group_id) === String(group.group_id)).length;
+      if (String(group.required).toLowerCase() === 'yes' && count === 0) throw new Error(group.group_name + ' is required.');
+      if (String(group.selection_type).toLowerCase() === 'single' && count > 1) throw new Error('Choose only one option for ' + group.group_name + '.');
+    });
+    const basePrice = Number(menuItem.base_price || 0);
+    if (!Number.isFinite(basePrice) || basePrice < 0 || selectedOptions.some(option => !Number.isFinite(option.price) || option.price < 0)) throw new Error('An item has an invalid price.');
+    const unitPrice = basePrice + selectedOptions.reduce((sum, option) => sum + option.price, 0);
+    const totalPrice = unitPrice * quantity;
+    subtotal += totalPrice;
+    const remarks = String(input.remarks || '').trim();
+    if (remarks.length > 160) throw new Error('Item remarks must be 160 characters or fewer.');
+    return { restaurant_id: restaurantId, item_id: menuItem.item_id, name: menuItem.name, base_price: basePrice, quantity: quantity, selected_options: selectedOptions, remarks: remarks, unit_price: unitPrice, total_price: totalPrice };
+  });
+
+  const required = ['customer_name', 'city', 'barangay', 'house_number'];
+  required.forEach(field => { if (!String(payload[field] || '').trim()) throw new Error(field + ' is required.'); });
+  const contactNumber = String(payload.contact_number || '').replace(/\s/g, '');
+  if (!/^\+63\d{10}$/.test(contactNumber)) throw new Error('A valid Philippine contact number is required.');
+  const orderRemarks = String(payload.order_remarks || '').trim();
+  if (orderRemarks.length > 500) throw new Error('Order remarks must be 500 characters or fewer.');
+  return { restaurant_id: restaurantId, items: items, subtotal: subtotal, customer_name: String(payload.customer_name).trim(), contact_number: contactNumber, city: String(payload.city).trim(), barangay: String(payload.barangay).trim(), house_number: String(payload.house_number).trim(), order_remarks: orderRemarks };
 }
 
 function getOrders(statusFilter) {

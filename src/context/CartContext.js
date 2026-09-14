@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 const CartContext = createContext(null);
 const CART_KEY = 'tmg-cart-v1';
@@ -10,7 +10,10 @@ export function CartProvider({ children }) {
   const [items, setItems] = useState([]);
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    try { setItems(JSON.parse(localStorage.getItem(CART_KEY) || '[]')); } catch { setItems([]); }
+    try {
+      const stored = JSON.parse(localStorage.getItem(CART_KEY) || '[]');
+      setItems(Array.isArray(stored) ? stored : []);
+    } catch { setItems([]); }
     setReady(true);
   }, []);
   useEffect(() => { if (ready) localStorage.setItem(CART_KEY, JSON.stringify(items)); }, [items, ready]);
@@ -20,11 +23,16 @@ export function CartProvider({ children }) {
     setItems((current) => [...current, { ...item, cart_id: crypto.randomUUID() }]);
     return true;
   };
-  const removeItem = (cartId) => setItems((current) => current.filter((item) => item.cart_id !== cartId));
-  const clearCart = () => setItems([]);
+  const removeItem = useCallback((cartId) => setItems((current) => current.filter((item) => item.cart_id !== cartId)), []);
+  const clearCart = useCallback(() => setItems([]), []);
   const subtotal = useMemo(() => items.reduce((sum, item) => sum + Number(item.total_price || 0), 0), [items]);
-  const saveOrder = (order) => localStorage.setItem(ORDER_KEY, JSON.stringify(order));
-  const getSavedOrder = () => { try { return JSON.parse(localStorage.getItem(ORDER_KEY) || 'null'); } catch { return null; } };
+  const saveOrder = useCallback((order) => localStorage.setItem(ORDER_KEY, JSON.stringify(order)), []);
+  const getSavedOrder = useCallback(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(ORDER_KEY) || 'null');
+      return stored && typeof stored === 'object' ? stored : null;
+    } catch { return null; }
+  }, []);
 
   return <CartContext.Provider value={{ items, ready, subtotal, addItem, removeItem, clearCart, saveOrder, getSavedOrder }}>{children}</CartContext.Provider>;
 }
