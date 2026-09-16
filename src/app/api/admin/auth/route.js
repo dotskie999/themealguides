@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { apiRequest } from '@/lib/api';
+import { verifyAdminPin } from '@/lib/api';
 import { ADMIN_COOKIE, adminCookieOptions, createAdminToken } from '@/lib/adminAuth';
 
 const attempts = new Map();
@@ -16,8 +16,7 @@ export async function POST(request) {
   try {
     const { pin } = await request.json();
     if (!pin) return NextResponse.json({ error: 'Enter your admin PIN.' }, { status: 400 });
-    const result = await apiRequest('verifyAdminPin', { method: 'POST', body: { pin: String(pin) } });
-    if (!result?.valid) {
+    if (!verifyAdminPin(pin)) {
       attempts.set(key, { count: (entry?.until > now ? entry.count : 0) + 1, until: now + WINDOW_MS });
       return NextResponse.json({ error: 'Incorrect PIN.' }, { status: 401 });
     }

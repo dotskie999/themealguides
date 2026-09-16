@@ -12,6 +12,11 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      SUPABASE_URL: https://example.supabase.co
+      SUPABASE_SECRET_KEY: sb_secret_ci_build_placeholder
+      ADMIN_PIN: ci-only-placeholder
+      ADMIN_SESSION_SECRET: ci-only-session-secret-with-at-least-32-characters
 
     steps:
       - name: Check out repository

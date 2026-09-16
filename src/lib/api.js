@@ -1,24 +1,369 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
+import 'server-only';
 
-export async function apiRequest(action, { params = {}, method = 'GET', body } = {}) {
-  if (!API_URL) throw new Error('NEXT_PUBLIC_API_URL is not configured.');
-  const url = new URL(API_URL);
-  url.searchParams.set('action', action);
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
-  });
-  const response = await fetch(url.toString(), {
-    method,
-    cache: 'no-store',
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!response.ok) throw new Error(`Request failed with status ${response.status}.`);
-  const result = await response.json();
-  if (result?.success === false) throw new Error(result.error || 'The kitchen could not complete the request.');
-  return result?.data ?? result;
+import crypto from 'crypto';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { distanceKm } from '@/lib/distance';
+
+const ORDER_STATUSES = ['pending', 'confirmed', 'preparing', 'ready', 'completed', 'cancelled'];
+
+function databaseError(error, context) {
+  console.error(`Supabase ${context} error:`, error?.message || error);
+  return new Error(`The database could not ${context}.`);
 }
 
-export const getRestaurants = () => apiRequest('getRestaurants');
-export const getMenu = (restaurantId) => apiRequest('getMenu', { params: { restaurant_id: restaurantId } });
-export const submitOrder = (payload) => apiRequest('submitOrder', { method: 'POST', body: payload });
+function cleanRecord(record = {}) {
+  return Object.fromEntries(
+    Object.entries(record).map(([key, value]) => [key, value === '' || value === undefined ? null : value]),
+  );
+}
+
+function newId(prefix) {
+  return `${prefix}_${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`;
+}
+
+function bySortOrder(a, b) {
+  return Number(a.sort_order || 0) - Number(b.sort_order || 0);
+}
+
+async function selectAll(table) {
+  const { data, error } = await supabaseAdmin.from(table).select('*');
+  if (error) throw databaseError(error, `read ${table}`);
+  return data || [];
+}
+
+export async function getRestaurants() {
+  const { data, error } = await supabaseAdmin
+    .from('restaurants')
+    .select('*')
+    .eq('active', 'yes')
+    .order('name');
+  if (error) throw databaseError(error, 'load restaurants');
+  return data || [];
+}
+
+export async function getMenu(restaurantId) {
+  if (!restaurantId) throw new Error('A restaurant is required.');
+
+  const [restaurantResult, categoriesResult, itemsResult, groupsResult, optionsResult] = await Promise.all([
+    supabaseAdmin.from('restaurants').select('*').eq('restaurant_id', restaurantId).eq('active', 'yes').maybeSingle(),
+    supabaseAdmin.from('categories').select('*').eq('restaurant_id', restaurantId).eq('active', 'yes').order('sort_order'),
+    supabaseAdmin.from('menu_items').select('*').eq('restaurant_id', restaurantId).eq('active', 'yes'),
+    supabaseAdmin.from('option_groups').select('*').order('sort_order'),
+    supabaseAdmin.from('options').select('*').order('sort_order'),
+  ]);
+
+  for (const [result, label] of [
+    [restaurantResult, 'load restaurant'],
+    [categoriesResult, 'load categories'],
+    [itemsResult, 'load menu items'],
+    [groupsResult, 'load option groups'],
+    [optionsResult, 'load options'],
+  ]) {
+    if (result.error) throw databaseError(result.error, label);
+  }
+
+  if (!restaurantResult.data) throw new Error('Restaurant not found.');
+
+  const optionsByGroup = new Map();
+  for (const option of optionsResult.data || []) {
+    const options = optionsByGroup.get(option.group_id) || [];
+    options.push(option);
+    optionsByGroup.set(option.group_id, options);
+  }
+
+  const groups = groupsResult.data || [];
+  const menuItems = (itemsResult.data || []).map((item) => ({
+    ...item,
+    option_groups: groups
+      .filter((group) => group.category_id
+        ? group.category_id === item.category_id
+        : group.item_id === item.item_id)
+      .sort(bySortOrder)
+      .map((group) => ({ ...group, options: optionsByGroup.get(group.group_id) || [] })),
+  }));
+
+  return menuItems;
+}
+
+export async function getOrders(status) {
+  let query = supabaseAdmin.from('orders').select('*').order('timestamp', { ascending: false });
+  if (status && status !== 'All') query = query.eq('status', status);
+  const { data, error } = await query;
+  if (error) throw databaseError(error, 'load orders');
+  return (data || []).map(({ items_json, timestamp, ...order }) => ({
+    ...order,
+    created_at: timestamp,
+    items: items_json || [],
+  }));
+}
+
+export async function getAdminData() {
+  const [restaurants, categories, menuItems, optionGroups, options, guests] = await Promise.all([
+    selectAll('restaurants'),
+    selectAll('categories'),
+    selectAll('menu_items'),
+    selectAll('option_groups'),
+    selectAll('options'),
+    getGuests(),
+  ]);
+  return { restaurants, categories, menuItems, optionGroups, options, guests };
+}
+
+export async function getAdminSnapshot() {
+  const [data, orders] = await Promise.all([getAdminData(), getOrders()]);
+  return { ...data, orders };
+}
+
+function validatedQuantity(value) {
+  const quantity = Number(value);
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99) {
+    throw new Error('Each item quantity must be between 1 and 99.');
+  }
+  return quantity;
+}
+
+async function buildOrderItems(restaurantId, requestedItems) {
+  const menu = await getMenu(restaurantId);
+  const itemMap = new Map(menu.map((item) => [item.item_id, item]));
+
+  return requestedItems.map((requested) => {
+    const item = itemMap.get(requested.item_id);
+    if (!item) throw new Error('One of the selected menu items is unavailable.');
+    const quantity = validatedQuantity(requested.quantity ?? requested.qty);
+    const selectedIds = new Set(
+      (requested.options || requested.selected_options || []).map((option) =>
+        typeof option === 'string' ? option : option.option_id,
+      ),
+    );
+    const selectedOptions = [];
+
+    for (const group of item.option_groups || []) {
+      const groupOptions = group.options || [];
+      const selectedForGroup = groupOptions.filter((option) => selectedIds.has(option.option_id));
+      if (group.required === 'yes' && selectedForGroup.length === 0) {
+        throw new Error(`Please select an option for ${group.group_name}.`);
+      }
+      if (group.selection_type === 'single' && selectedForGroup.length > 1) {
+        throw new Error(`Only one option can be selected for ${group.group_name}.`);
+      }
+      selectedOptions.push(...selectedForGroup.map((option) => ({
+        option_id: option.option_id,
+        option_name: option.option_name,
+        price: Number(option.price || 0),
+      })));
+    }
+
+    if (selectedOptions.length !== selectedIds.size) {
+      throw new Error('One of the selected options is unavailable for this item.');
+    }
+
+    const unitPrice = Number(item.base_price || 0)
+      + selectedOptions.reduce((sum, option) => sum + option.price, 0);
+    return {
+      item_id: item.item_id,
+      name: item.name,
+      quantity,
+      base_price: Number(item.base_price || 0),
+      selected_options: selectedOptions,
+      remarks: String(requested.remarks || '').trim(),
+      unit_price: unitPrice,
+      total_price: unitPrice * quantity,
+    };
+  });
+}
+
+export async function submitOrder(payload = {}) {
+  const restaurantId = payload.restaurant_id;
+  const requestedItems = payload.items;
+  if (!restaurantId || !Array.isArray(requestedItems) || requestedItems.length === 0) {
+    throw new Error('The order must contain at least one menu item.');
+  }
+
+  for (const field of ['customer_name', 'contact_number', 'city', 'barangay', 'house_number']) {
+    if (!String(payload[field] || '').trim()) throw new Error('Please complete all required customer details.');
+  }
+
+  const items = await buildOrderItems(restaurantId, requestedItems);
+  const subtotal = items.reduce((sum, item) => sum + item.total_price, 0);
+  const deliveryLatitude = payload.latitude === null || payload.latitude === undefined ? null : Number(payload.latitude);
+  const deliveryLongitude = payload.longitude === null || payload.longitude === undefined ? null : Number(payload.longitude);
+  const { data: restaurantLocation, error: locationError } = await supabaseAdmin
+    .from('restaurants')
+    .select('latitude,longitude')
+    .eq('restaurant_id', restaurantId)
+    .single();
+  if (locationError) throw databaseError(locationError, 'load restaurant location');
+  const deliveryDistance = distanceKm(deliveryLatitude, deliveryLongitude, restaurantLocation.latitude, restaurantLocation.longitude);
+  const { data, error } = await supabaseAdmin
+    .from('orders')
+    .insert({
+      restaurant_id: restaurantId,
+      items_json: items,
+      subtotal,
+      customer_name: String(payload.customer_name).trim(),
+      customer_email: String(payload.customer_email || '').trim() || null,
+      contact_number: String(payload.contact_number).trim(),
+      city: String(payload.city).trim(),
+      barangay: String(payload.barangay).trim(),
+      house_number: String(payload.house_number).trim(),
+      landmark: String(payload.landmark || '').trim(),
+      order_remarks: String(payload.order_remarks || '').trim(),
+      delivery_latitude: Number.isFinite(deliveryLatitude) ? deliveryLatitude : null,
+      delivery_longitude: Number.isFinite(deliveryLongitude) ? deliveryLongitude : null,
+      distance_km: deliveryDistance === null ? null : Number(deliveryDistance.toFixed(2)),
+      status: 'pending',
+    })
+    .select('order_number,status,timestamp')
+    .single();
+  if (error) throw databaseError(error, 'create the order');
+  return { ...data, order_number: String(data.order_number).padStart(4, '0') };
+}
+
+export async function getGuests() {
+  const { data, error } = await supabaseAdmin
+    .from('guests')
+    .select('*')
+    .order('last_visited_at', { ascending: false });
+  if (error?.code === 'PGRST205' || error?.code === '42P01') return [];
+  if (error) throw databaseError(error, 'load guest information');
+  return data || [];
+}
+
+export async function saveGuest(payload = {}) {
+  const guestId = String(payload.guest_id || '');
+  const customerName = String(payload.customer_name || '').trim();
+  const customerEmail = String(payload.customer_email || '').trim().toLowerCase();
+  const contactNumber = String(payload.contact_number || '').replace(/\s/g, '');
+  const city = String(payload.city || '').trim();
+  const barangay = String(payload.barangay || '').trim();
+  const houseNumber = String(payload.house_number || '').trim();
+  const latitude = payload.latitude === null || payload.latitude === undefined ? null : Number(payload.latitude);
+  const longitude = payload.longitude === null || payload.longitude === undefined ? null : Number(payload.longitude);
+  const locationAccuracy = payload.location_accuracy === null || payload.location_accuracy === undefined ? null : Number(payload.location_accuracy);
+
+  if (!/^[0-9a-f-]{36}$/i.test(guestId)) throw new Error('Invalid guest identifier.');
+  if (!customerName || !city || !barangay || !houseNumber) throw new Error('Please complete all guest details.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) throw new Error('Enter a valid email address.');
+  if (!/^\+63\d{10}$/.test(contactNumber)) throw new Error('Enter a valid Philippine contact number.');
+  if (!payload.consent_at) throw new Error('Consent is required before guest details can be saved.');
+  if ((latitude !== null && (!Number.isFinite(latitude) || latitude < -90 || latitude > 90))
+    || (longitude !== null && (!Number.isFinite(longitude) || longitude < -180 || longitude > 180))) {
+    throw new Error('Invalid location coordinates.');
+  }
+
+  const { data: existing, error: readError } = await supabaseAdmin
+    .from('guests')
+    .select('visit_count')
+    .eq('guest_id', guestId)
+    .maybeSingle();
+  if (readError) throw databaseError(readError, 'find the guest');
+
+  const { data, error } = await supabaseAdmin
+    .from('guests')
+    .upsert({
+      guest_id: guestId,
+      customer_name: customerName,
+      customer_email: customerEmail,
+      contact_number: contactNumber,
+      city,
+      barangay,
+      house_number: houseNumber,
+      consent_at: payload.consent_at,
+      latitude,
+      longitude,
+      location_accuracy: Number.isFinite(locationAccuracy) ? locationAccuracy : null,
+      last_visited_at: new Date().toISOString(),
+      visit_count: Number(existing?.visit_count || 0) + (payload.track_visit === false ? 0 : 1),
+    }, { onConflict: 'guest_id' })
+    .select()
+    .single();
+  if (error) throw databaseError(error, 'save guest information');
+  return data;
+}
+
+async function upsert(table, keyField, record, idPrefix) {
+  const cleaned = cleanRecord(record);
+  if (!cleaned[keyField]) cleaned[keyField] = newId(idPrefix);
+  const { data, error } = await supabaseAdmin
+    .from(table)
+    .upsert(cleaned, { onConflict: keyField })
+    .select()
+    .single();
+  if (error) throw databaseError(error, `save ${table}`);
+  return data;
+}
+
+export const saveRestaurant = (record) => upsert('restaurants', 'restaurant_id', record, 'r');
+export const saveCategory = (record) => upsert('categories', 'category_id', record, 'cat');
+
+export async function saveMenuItem(record = {}) {
+  const cleaned = cleanRecord(record);
+  if (cleaned.category_id) {
+    const { data, error } = await supabaseAdmin
+      .from('categories')
+      .select('restaurant_id,name')
+      .eq('category_id', cleaned.category_id)
+      .single();
+    if (error) throw databaseError(error, 'find the menu category');
+    cleaned.restaurant_id = data.restaurant_id;
+    cleaned.category = data.name;
+  }
+  return upsert('menu_items', 'item_id', cleaned, 'item');
+}
+
+export const saveOptionGroup = (record) => upsert('option_groups', 'group_id', record, 'og');
+export const saveOption = (record) => upsert('options', 'option_id', record, 'opt');
+
+export async function updateOrderStatus(orderNumber, status) {
+  if (!ORDER_STATUSES.includes(status)) throw new Error('Invalid order status.');
+  const numericOrderNumber = Number(orderNumber);
+  if (!Number.isInteger(numericOrderNumber)) throw new Error('Invalid order number.');
+
+  const { data: existing, error: readError } = await supabaseAdmin
+    .from('orders')
+    .select('status')
+    .eq('order_number', numericOrderNumber)
+    .single();
+  if (readError) throw databaseError(readError, 'find the order');
+  if (existing.status === 'Completed' && status !== 'Completed') {
+    throw new Error('Completed orders cannot be reopened.');
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('orders')
+    .update({ status })
+    .eq('order_number', numericOrderNumber)
+    .select()
+    .single();
+  if (error) throw databaseError(error, 'update order status');
+  return { ...data, order_number: String(data.order_number).padStart(4, '0') };
+}
+
+export function verifyAdminPin(pin) {
+  const expected = process.env.ADMIN_PIN;
+  if (!expected) throw new Error('ADMIN_PIN is not configured.');
+  const suppliedBuffer = Buffer.from(String(pin || ''));
+  const expectedBuffer = Buffer.from(expected);
+  return suppliedBuffer.length === expectedBuffer.length
+    && crypto.timingSafeEqual(suppliedBuffer, expectedBuffer);
+}
+
+export async function apiRequest(action, { params = {}, body = {} } = {}) {
+  const record = body.record || body;
+  const actions = {
+    getRestaurants: () => getRestaurants(),
+    getMenu: () => getMenu(params.restaurant_id || body.restaurant_id),
+    getOrders: () => getOrders(params.status || body.status),
+    getAdminData: () => getAdminData(),
+    getAdminSnapshot: () => getAdminSnapshot(),
+    submitOrder: () => submitOrder(body),
+    saveRestaurant: () => saveRestaurant(record),
+    saveCategory: () => saveCategory(record),
+    saveMenuItem: () => saveMenuItem(record),
+    saveOptionGroup: () => saveOptionGroup(record),
+    saveOption: () => saveOption(record),
+    updateOrderStatus: () => updateOrderStatus(body.order_number, body.new_status || body.status),
+  };
+  if (!actions[action]) throw new Error(`Unsupported action: ${action}`);
+  return actions[action]();
+}

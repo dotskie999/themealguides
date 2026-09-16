@@ -1,22 +1,38 @@
 # The Meal Guides
 
-A responsive restaurant ordering storefront and kitchen dashboard built with Next.js. Restaurant, menu, add-on, and order data is stored in Google Sheets through a Google Apps Script web API.
+Mobile-first, multi-restaurant ordering built with Next.js and Supabase. Customers can discover nearby kitchens, customize menu items, place guest orders, and save a downloadable receipt. A PIN-protected dashboard manages restaurants, menus, add-ons, guests, and order status.
 
 ## Features
 
-- Multi-restaurant storefront and categorized menus
+- Responsive restaurant storefront and categorized menus
+- Browser geolocation with free straight-line distance and estimated travel time
+- Restaurant delivery-radius indicators and nearest-first sorting
 - Configurable single- and multiple-choice add-ons
-- Persistent guest cart and mobile-responsive checkout
-- NCR city and barangay lookup
-- Receipt and order-number flow
-- PIN-protected restaurant administration dashboard
-- Restaurant, category, menu, add-on, order-status, and CSV report management
+- Consent-based guest profiles saved for returning visits
+- NCR city and barangay lookup with editable checkout details
+- Server-validated menu prices, add-ons, quantities, and order totals
+- Downloadable PNG order receipts
+- Facebook links for The Meal Guides
+- PIN-protected administration dashboard
+- Restaurant, category, menu, add-on, guest, order-status, and CSV report management
+- Restaurant and category filters in the administration dashboard
+
+## Technology
+
+- Next.js 14 and React 18
+- Supabase/Postgres
+- Tailwind/PostCSS plus application CSS
+- Lucide icons
+- PSGC Cloud for NCR city and barangay lists
+- Browser Geolocation API and the Haversine formula for distance estimates
+
+No paid map or routing API is required. Travel times are estimates derived from straight-line distance and are not live-traffic ETAs.
 
 ## Requirements
 
 - Node.js 20 or newer
 - npm
-- A Google Sheet with the Apps Script backend from `google-apps-script/Code.gs`
+- A Supabase project
 
 ## Local setup
 
@@ -26,36 +42,37 @@ A responsive restaurant ordering storefront and kitchen dashboard built with Nex
    npm ci
    ```
 
-2. Copy `.env.example` to `.env.local` and fill in both values:
+2. Create the database. For a new project, follow [SUPABASE_MIGRATION_GUIDE.md](./SUPABASE_MIGRATION_GUIDE.md). For an existing project created before guest profiles and geolocation, run these migrations in order:
+
+   - [GUESTS_MIGRATION.sql](./GUESTS_MIGRATION.sql)
+   - [GEOLOCATION_MIGRATION.sql](./GEOLOCATION_MIGRATION.sql)
+
+3. Copy `.env.example` to `.env.local` and replace every placeholder:
 
    ```env
-   NEXT_PUBLIC_API_URL="https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec"
+   SUPABASE_URL="https://your-project.supabase.co"
+   SUPABASE_SECRET_KEY="your-server-secret-key"
+   ADMIN_PIN="your-private-admin-pin"
    ADMIN_SESSION_SECRET="a-long-random-production-secret"
    ```
 
-3. Start the development server:
+4. Start the development server:
 
    ```bash
    npm run dev
    ```
 
-4. Open [http://localhost:3000](http://localhost:3000). The admin dashboard is available at `/admin`.
+5. Open [http://localhost:3000](http://localhost:3000). If that port is occupied, Next.js will print the alternate port in the terminal. The dashboard is available at `/admin`.
 
-## Google Apps Script backend
+## Configure restaurant distance
 
-1. Open the Google Sheet used by the project.
-2. Open **Extensions → Apps Script**.
-3. Replace the editor contents with `google-apps-script/Code.gs`.
-4. Deploy it as a web app and allow the storefront to access the deployment.
-5. Put the deployed `/exec` URL in `NEXT_PUBLIC_API_URL`.
+Open **Admin → Restaurants** and enter the business address, latitude, longitude, and delivery radius for each restaurant. Customers must explicitly allow browser location access before distance is calculated. Manual address entry remains available when location permission is declined.
 
-The script expects these sheets: `Restaurants`, `Categories`, `MenuItems`, `OptionGroups`, `Options`, `Orders`, `Order_Counter`, and `AdminAuth`. The administrator PIN is read from cell `AdminAuth!A2`.
-
-After changing `Code.gs`, create a new Apps Script deployment version; saving the script alone does not update the deployed API.
+Customer coordinates are server-only data and are covered by the onboarding consent notice. Do not expose the Supabase secret key to client components.
 
 ## Validation
 
-Run all repository checks before committing:
+Run the same checks used by GitHub Actions:
 
 ```bash
 npm run check
@@ -63,6 +80,20 @@ npm run check
 
 ## Deployment
 
-The frontend can be deployed to Vercel or another Node.js-compatible host. Configure `NEXT_PUBLIC_API_URL` and `ADMIN_SESSION_SECRET` in the hosting provider rather than committing an `.env` file.
+Deploy to Vercel or another Node.js-compatible platform and configure all four environment variables from `.env.example` in the provider’s encrypted environment settings.
 
-Because `NEXT_PUBLIC_API_URL` is used by the server-rendered frontend, the Apps Script deployment must remain reachable from the deployed application.
+For production:
+
+- Use HTTPS so browser geolocation is available.
+- Use a unique, strong `ADMIN_SESSION_SECRET` and private `ADMIN_PIN`.
+- Keep `SUPABASE_SECRET_KEY` server-only.
+- Confirm Row Level Security and the grants in the migration guide.
+- Review the consent wording whenever analytics or advertising integrations are introduced.
+
+## Legacy Google Sheets backend
+
+The `google-apps-script/` directory is retained only as migration and rollback reference. The current application reads and writes through Supabase.
+
+## Social
+
+[The Meal Guides on Facebook](https://www.facebook.com/themealguides)
