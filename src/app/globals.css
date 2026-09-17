@@ -54,7 +54,6 @@ h1,h2,h3 { font-family:var(--font-display),sans-serif; color:var(--heading); lin
 .state-card h3 { font-size:1.5rem; margin-bottom:8px; }
 .tiny-footer { padding:22px 20px 110px; text-align:center; color:rgba(86,42,17,.7); font-size:.82rem; font-weight:700; }
 .tiny-footer p { margin-top:12px; }
-.map-attribution { display:inline-block; margin-top:7px; color:rgba(86,42,17,.72); font-size:.7rem; }
 .facebook-link { width:max-content; max-width:100%; min-height:46px; margin:0 auto; padding:0 17px; display:inline-flex; align-items:center; justify-content:center; gap:9px; border-radius:13px; background:#1877f2; color:white; text-decoration:none; font-weight:900; box-shadow:0 5px 15px rgba(24,119,242,.22); }
 .facebook-link > span { width:25px; height:25px; display:grid; place-items:center; border-radius:50%; background:white; color:#1877f2; font:bold 21px/1 Arial; }
 .guest-greeting { position:absolute; z-index:3; top:18px; right:20px; padding:10px 13px; display:grid; gap:2px; border:1px solid rgba(109,53,29,.18); border-radius:14px; background:rgba(255,255,255,.78); color:var(--brown); font:inherit; text-align:left; cursor:pointer; backdrop-filter:blur(10px); }

@@ -7,7 +7,7 @@ import { useCart } from '@/context/CartContext';
 import { normalizeImageUrl } from '@/lib/images';
 
 const money = (value) => `₱${Number(value || 0).toFixed(2)}`;
-export default function MenuClient({ items, restaurantId }) {
+export default function MenuClient({ items, restaurantId, restaurantName, restaurantSlug }) {
   const [selectedItem, setSelectedItem] = useState(null);
   const [selections, setSelections] = useState({});
   const [quantity, setQuantity] = useState(1);
@@ -20,7 +20,7 @@ export default function MenuClient({ items, restaurantId }) {
   const unitPrice = Number(selectedItem?.base_price || 0) + optionTotal;
   const openItem = (item) => { setSelectedItem(item); setSelections({}); setQuantity(1); setRemarks(''); setError(''); };
   const chooseOption = (group, option) => { setError(''); setSelections((current) => { if (group.selection_type === 'single') return { ...current, [group.group_id]: [option] }; const chosen = current[group.group_id] || []; return { ...current, [group.group_id]: chosen.some((entry) => String(entry.option_id) === String(option.option_id)) ? chosen.filter((entry) => String(entry.option_id) !== String(option.option_id)) : [...chosen, option] }; }); };
-  const addToCart = () => { const missing = (selectedItem.option_groups || []).find((group) => group.required === 'yes' && !(selections[group.group_id] || []).length); if (missing) { setError(`Please choose an option for ${missing.group_name}.`); return; } const added = addItem({ restaurant_id: restaurantId, item_id: selectedItem.item_id, name: selectedItem.name, base_price: Number(selectedItem.base_price), quantity, selected_options: Object.values(selections).flat(), remarks, unit_price: unitPrice, total_price: unitPrice * quantity }); if (!added) { setError('Your cart contains food from another kitchen. Complete that order first.'); return; } setSelectedItem(null); };
+  const addToCart = () => { const missing = (selectedItem.option_groups || []).find((group) => group.required === 'yes' && !(selections[group.group_id] || []).length); if (missing) { setError(`Please choose an option for ${missing.group_name}.`); return; } const added = addItem({ restaurant_id: restaurantId, restaurant_name: restaurantName, restaurant_slug: restaurantSlug, item_id: selectedItem.item_id, name: selectedItem.name, base_price: Number(selectedItem.base_price), quantity, selected_options: Object.values(selections).flat(), remarks, unit_price: unitPrice, total_price: unitPrice * quantity }); if (!added) { setError('Your cart contains food from another kitchen. Complete that order first.'); return; } setSelectedItem(null); };
 
   return <>
     <nav className="category-chips" aria-label="Menu categories">{Object.keys(grouped).map((category) => <a href={`#${encodeURIComponent(category)}`} key={category}>{category}</a>)}</nav>

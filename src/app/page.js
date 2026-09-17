@@ -31,7 +31,7 @@ export default async function Home() {
           <RestaurantGrid restaurants={restaurants} />
         )}
       </section>
-      <footer className="tiny-footer"><FacebookLink /><p>Made fresh by The Meal Guides · Guest checkout, always.</p><a className="map-attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">Distance estimates © OpenStreetMap contributors</a></footer>
+      <footer className="tiny-footer"><FacebookLink /><p>Made fresh by The Meal Guides · Guest checkout, always.</p></footer>
     </main>
   );
 }
