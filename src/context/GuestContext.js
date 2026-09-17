@@ -24,8 +24,40 @@ export function GuestProvider({ children }) {
     try {
       const stored = JSON.parse(localStorage.getItem(GUEST_KEY) || 'null');
       if (stored?.guest_id && stored?.consent_at) {
-        setGuest(stored);
-        syncGuest(stored).catch(() => {});
+        const safeStored = stored.location_source === 'address' ? stored : {
+          ...stored,
+          latitude: null,
+          longitude: null,
+          location_accuracy: null,
+          location_source: null,
+        };
+        setGuest(safeStored);
+        localStorage.setItem(GUEST_KEY, JSON.stringify(safeStored));
+        (async () => {
+          let refreshed = safeStored;
+          if (safeStored.location_source !== 'address' && safeStored.city && safeStored.barangay) {
+            try {
+              const response = await fetch('/api/geocode', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ city: safeStored.city, barangay: safeStored.barangay }),
+              });
+              const result = await response.json();
+              if (response.ok && result.location) refreshed = {
+                ...safeStored,
+                latitude: result.location.latitude,
+                longitude: result.location.longitude,
+                location_source: 'address',
+              };
+            } catch {}
+          }
+          const saved = await syncGuest(refreshed).catch(() => null);
+          if (saved) {
+            const nextGuest = { ...refreshed, ...saved };
+            localStorage.setItem(GUEST_KEY, JSON.stringify(nextGuest));
+            setGuest(nextGuest);
+          }
+        })();
       }
     } catch {}
     setGuestReady(true);
@@ -44,16 +76,26 @@ export function GuestProvider({ children }) {
     return localGuest;
   }, []);
 
-  const updateLocation = useCallback(async ({ latitude, longitude, location_accuracy }) => {
+  const updateLocation = useCallback(async ({ latitude, longitude, location_accuracy, location_source }) => {
     if (!guest) return null;
-    const saved = await syncGuest({ ...guest, latitude, longitude, location_accuracy }, false);
+    const saved = await syncGuest({ ...guest, latitude, longitude, location_accuracy, location_source }, false);
     const localGuest = { ...guest, ...saved };
     localStorage.setItem(GUEST_KEY, JSON.stringify(localGuest));
     setGuest(localGuest);
     return localGuest;
   }, [guest]);
 
-  return <GuestContext.Provider value={{ guest, guestReady, saveGuest, updateLocation }}>{children}</GuestContext.Provider>;
+  const updateGuest = useCallback(async (details) => {
+    if (!guest) return null;
+    const record = { ...guest, ...details, guest_id: guest.guest_id, consent_at: guest.consent_at };
+    const saved = await syncGuest(record, false);
+    const localGuest = { ...record, ...saved };
+    localStorage.setItem(GUEST_KEY, JSON.stringify(localGuest));
+    setGuest(localGuest);
+    return localGuest;
+  }, [guest]);
+
+  return <GuestContext.Provider value={{ guest, guestReady, saveGuest, updateLocation, updateGuest }}>{children}</GuestContext.Provider>;
 }
 
 export function useGuest() {

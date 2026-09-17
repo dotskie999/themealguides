@@ -7,7 +7,7 @@ import { useCart } from '@/context/CartContext';
 import { useGuest } from '@/context/GuestContext';
 
 const money = (value) => `₱${Number(value || 0).toFixed(2)}`;
-const initialForm = { customer_name: '', customer_email: '', contact_number: '+63', city: '', city_code: '', barangay: '', house_number: '', order_remarks: '', latitude: null, longitude: null, location_accuracy: null };
+const initialForm = { customer_name: '', customer_email: '', contact_number: '+63', city: '', city_code: '', barangay: '', house_number: '', order_remarks: '', latitude: null, longitude: null, location_accuracy: null, location_source: null };
 
 export default function CartPage() {
   const { items, ready, subtotal, removeItem, clearCart, saveOrder } = useCart();
@@ -20,7 +20,11 @@ export default function CartPage() {
   const [locationsLoading, setLocationsLoading] = useState(true);
   const [locationError, setLocationError] = useState('');
   const router = useRouter();
-  const update = (event) => setForm((current) => ({ ...current, [event.target.name]: event.target.value }));
+  const update = (event) => setForm((current) => ({
+    ...current,
+    [event.target.name]: event.target.value,
+    ...(event.target.name === 'barangay' ? { latitude:null, longitude:null, location_source:null } : {}),
+  }));
 
   useEffect(() => {
     const controller = new AbortController();
@@ -55,6 +59,7 @@ export default function CartPage() {
       latitude: guest.latitude ?? null,
       longitude: guest.longitude ?? null,
       location_accuracy: guest.location_accuracy ?? null,
+      location_source: guest.location_source || null,
     }));
     if (guest.city_code) {
       fetch(`/api/locations?city=${encodeURIComponent(guest.city_code)}`)
@@ -66,7 +71,7 @@ export default function CartPage() {
   const chooseCity = async (event) => {
     const city_code = event.target.value;
     const city = cities.find(entry => entry.code === city_code)?.name || '';
-    setForm(current => ({ ...current, city_code, city, barangay: '' }));
+    setForm(current => ({ ...current, city_code, city, barangay: '', latitude:null, longitude:null, location_source:null }));
     setBarangays([]); setLocationsLoading(true); setLocationError('');
     try {
       const response = await fetch(`/api/locations?city=${encodeURIComponent(city_code)}`);
@@ -84,7 +89,15 @@ export default function CartPage() {
     if (!/^\+63\d{10}$/.test(form.contact_number.replace(/\s/g, ''))) { setError('Use a valid Philippine number in +63 format, e.g. +639171234567.'); return; }
     setSubmitting(true);
     try {
-      const { city_code, ...address } = form;
+      let checkoutForm = form;
+      if ((!form.latitude || form.location_source !== 'address') && form.city && form.barangay) {
+        try {
+          const locationResponse = await fetch('/api/geocode', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({city:form.city,barangay:form.barangay}) });
+          const locationResult = await locationResponse.json();
+          if (locationResponse.ok && locationResult.location) checkoutForm = { ...form, latitude:locationResult.location.latitude, longitude:locationResult.location.longitude, location_accuracy:null, location_source:'address' };
+        } catch {}
+      }
+      const { city_code, ...address } = checkoutForm;
       const payload = { restaurant_id: items[0].restaurant_id, items: items.map(({ cart_id, ...item }) => item), subtotal, ...address, contact_number: form.contact_number.replace(/\s/g, '') };
       const response = await fetch('/api/order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const result = await response.json();

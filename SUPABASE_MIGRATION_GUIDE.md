@@ -124,6 +124,7 @@ create table public.orders (
   delivery_latitude double precision,
   delivery_longitude double precision,
   distance_km numeric(8, 2),
+  location_source text,
   status text not null default 'pending'
     check (status in ('pending', 'confirmed', 'preparing', 'ready', 'completed', 'cancelled')),
   timestamp timestamptz not null default now()
@@ -146,6 +147,7 @@ create table public.guests (
   latitude double precision check (latitude is null or latitude between -90 and 90),
   longitude double precision check (longitude is null or longitude between -180 and 180),
   location_accuracy double precision,
+  location_source text,
   consent_at timestamptz not null,
   first_visited_at timestamptz not null default now(),
   last_visited_at timestamptz not null default now(),
@@ -154,6 +156,16 @@ create table public.guests (
 
 create index guests_last_visited_idx
   on public.guests (last_visited_at desc);
+
+create table public.location_cache (
+  cache_key text primary key,
+  city text not null,
+  barangay text not null,
+  latitude double precision not null check (latitude between -90 and 90),
+  longitude double precision not null check (longitude between -180 and 180),
+  display_name text,
+  updated_at timestamptz not null default now()
+);
 ```
 
 The `active` and `required` fields intentionally remain `yes`/`no` text during the first migration. That matches the existing frontend and avoids unnecessary application changes during cutover.
@@ -172,6 +184,7 @@ alter table public.option_groups enable row level security;
 alter table public.options enable row level security;
 alter table public.orders enable row level security;
 alter table public.guests enable row level security;
+alter table public.location_cache enable row level security;
 
 revoke all on table public.restaurants from anon, authenticated;
 revoke all on table public.categories from anon, authenticated;
@@ -180,6 +193,7 @@ revoke all on table public.option_groups from anon, authenticated;
 revoke all on table public.options from anon, authenticated;
 revoke all on table public.orders from anon, authenticated;
 revoke all on table public.guests from anon, authenticated;
+revoke all on table public.location_cache from anon, authenticated;
 
 grant all on table public.restaurants to service_role;
 grant all on table public.categories to service_role;
@@ -188,6 +202,7 @@ grant all on table public.option_groups to service_role;
 grant all on table public.options to service_role;
 grant all on table public.orders to service_role;
 grant all on table public.guests to service_role;
+grant all on table public.location_cache to service_role;
 grant usage, select on all sequences in schema public to service_role;
 ```
 

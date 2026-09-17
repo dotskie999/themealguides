@@ -9,6 +9,7 @@ import { useGuest } from '@/context/GuestContext';
 const initialForm = {
   city: '', city_code: '', barangay: '', house_number: '',
   customer_name: '', customer_email: '', contact_number: '+63', consent: false,
+  latitude: null, longitude: null, location_accuracy: null, location_source: null,
 };
 
 export default function GuestGate({ children }) {
@@ -20,7 +21,7 @@ export default function GuestGate({ children }) {
   const [barangays, setBarangays] = useState([]);
   const [loadingLocations, setLoadingLocations] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [locating, setLocating] = useState(false);
+  const [locationMessage, setLocationMessage] = useState('');
   const [error, setError] = useState('');
   const exempt = pathname.startsWith('/admin') || pathname.startsWith('/receipt/');
 
@@ -57,33 +58,37 @@ export default function GuestGate({ children }) {
     finally { setLoadingLocations(false); }
   };
 
-  const confirmLocation = (event) => {
+  const confirmLocation = async (event) => {
     event.preventDefault();
     setError('');
     setStep('finding');
-    window.setTimeout(() => setStep('details'), 1000);
-  };
-
-  const useCurrentLocation = () => {
-    setError('');
-    if (!navigator.geolocation) { setError('Location is not supported by this browser.'); return; }
-    setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      ({ coords }) => {
+    const startedAt = Date.now();
+    try {
+      const response = await fetch('/api/geocode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ city: form.city, barangay: form.barangay }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Address lookup unavailable.');
+      if (result.location) {
         setForm((current) => ({
           ...current,
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-          location_accuracy: Math.round(coords.accuracy),
+          latitude: result.location.latitude,
+          longitude: result.location.longitude,
+          location_accuracy: null,
+          location_source: 'address',
         }));
-        setLocating(false);
-      },
-      (locationError) => {
-        setError(locationError.code === 1 ? 'Location permission was declined. You can still enter your address manually.' : 'We could not determine your location. Please try again or continue manually.');
-        setLocating(false);
-      },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 300000 },
-    );
+        setLocationMessage('Distance will be estimated from the center of your delivery area.');
+      } else {
+        setLocationMessage('Your address is saved, but a distance estimate is not available for this area yet.');
+      }
+    } catch {
+      setLocationMessage('Your address is saved, but distance lookup is temporarily unavailable.');
+    } finally {
+      const remaining = Math.max(0, 1000 - (Date.now() - startedAt));
+      window.setTimeout(() => setStep('details'), remaining);
+    }
   };
 
   const submitDetails = async (event) => {
@@ -111,10 +116,10 @@ export default function GuestGate({ children }) {
         <h1>Where should we guide the feast?</h1>
         <p>Your doorstep is the coordinate, and your taste buds are the boss!</p>
         <form onSubmit={confirmLocation} className="guest-form">
-          <button type="button" className={`location-button full ${form.latitude?'located':''}`} onClick={useCurrentLocation} disabled={locating}>{locating?<><Loader2 className="spin"/> Finding your location…</>:form.latitude?<><MapPin/> Location found · accuracy ±{form.location_accuracy}m</>:<><MapPin/> Use my current location</>}</button>
           <label><span>City / Municipality</span><select name="city_code" value={form.city_code} onChange={chooseCity} required disabled={loadingLocations && !cities.length}><option value="">{loadingLocations && !cities.length ? 'Loading cities…' : 'Select your city'}</option>{cities.map((city) => <option value={city.code} key={city.code}>{city.name}</option>)}</select></label>
           <label><span>Barangay</span><select name="barangay" value={form.barangay} onChange={update} required disabled={!form.city_code || loadingLocations}><option value="">{loadingLocations && form.city_code ? 'Loading barangays…' : 'Select your barangay'}</option>{barangays.map((barangay) => <option value={barangay.name} key={barangay.code}>{barangay.name}</option>)}</select></label>
           <label className="full"><span>House number / Street</span><input name="house_number" value={form.house_number} onChange={update} placeholder="123 Mabini Street" required /></label>
+          <p className="address-location-note full"><MapPin size={17}/><span>Distance is estimated from your selected city and barangay—not your phone&apos;s live location. Your house/street is never sent for map lookup.</span></p>
           {error && <p className="form-error full">{error}</p>}
           <button className="primary-button full" disabled={loadingLocations}>Find food near me <ArrowRight size={19} /></button>
         </form>
@@ -123,10 +128,11 @@ export default function GuestGate({ children }) {
         <h1>Who are we guiding?</h1>
         <p>We found your neighborhood. Tell us who should receive the delicious news.</p>
         <form onSubmit={submitDetails} className="guest-form">
+          {locationMessage&&<p className="address-result full"><MapPin size={17}/>{locationMessage}</p>}
           <label className="full"><span>Customer name</span><input name="customer_name" value={form.customer_name} onChange={update} autoComplete="name" required /></label>
           <label className="full"><span>Customer email</span><input type="email" name="customer_email" value={form.customer_email} onChange={update} autoComplete="email" required /></label>
           <label className="full"><span>Customer contact</span><input name="contact_number" value={form.contact_number} onChange={update} inputMode="tel" autoComplete="tel" required /></label>
-          <label className="consent-box full"><input type="checkbox" name="consent" checked={form.consent} onChange={update} /><ShieldCheck size={21} /><span>By submitting my details, I consent to their use—including my approximate device location when enabled—for order processing, distance estimates, and delivery only. Information will be handled securely and not shared beyond what is necessary to complete the transaction.</span></label>
+          <label className="consent-box full"><input type="checkbox" name="consent" checked={form.consent} onChange={update} /><ShieldCheck size={21} /><span>By submitting my details, I consent to their use for order processing, address-based distance estimates, and delivery only. Information will be handled securely and not shared beyond what is necessary to complete the transaction.</span></label>
           {error && <p className="form-error full">{error}</p>}
           <button className="primary-button full" disabled={saving}>{saving ? <><Loader2 className="spin" /> Saving your seat…</> : <>Take me to the feast <ArrowRight size={19} /></>}</button>
         </form>

@@ -5,7 +5,7 @@ Mobile-first, multi-restaurant ordering built with Next.js and Supabase. Custome
 ## Features
 
 - Responsive restaurant storefront and categorized menus
-- Browser geolocation with free straight-line distance and estimated travel time
+- Address-based geocoding with free straight-line distance and estimated travel time
 - Restaurant delivery-radius indicators and nearest-first sorting
 - Configurable single- and multiple-choice add-ons
 - Consent-based guest profiles saved for returning visits
@@ -24,9 +24,9 @@ Mobile-first, multi-restaurant ordering built with Next.js and Supabase. Custome
 - Tailwind/PostCSS plus application CSS
 - Lucide icons
 - PSGC Cloud for NCR city and barangay lists
-- Browser Geolocation API and the Haversine formula for distance estimates
+- OpenStreetMap/Nominatim geocoding and the Haversine formula for distance estimates
 
-No paid map or routing API is required. Travel times are estimates derived from straight-line distance and are not live-traffic ETAs.
+No paid map or routing API is required. City and barangay lookups are cached in Supabase. Travel times are estimates derived from straight-line distance and are not live-traffic ETAs.
 
 ## Requirements
 
@@ -46,6 +46,7 @@ No paid map or routing API is required. Travel times are estimates derived from 
 
    - [GUESTS_MIGRATION.sql](./GUESTS_MIGRATION.sql)
    - [GEOLOCATION_MIGRATION.sql](./GEOLOCATION_MIGRATION.sql)
+   - [ADDRESS_GEOCODING_MIGRATION.sql](./ADDRESS_GEOCODING_MIGRATION.sql)
 
 3. Copy `.env.example` to `.env.local` and replace every placeholder:
 
@@ -66,9 +67,9 @@ No paid map or routing API is required. Travel times are estimates derived from 
 
 ## Configure restaurant distance
 
-Open **Admin → Restaurants** and enter the business address, latitude, longitude, and delivery radius for each restaurant. Customers must explicitly allow browser location access before distance is calculated. Manual address entry remains available when location permission is declined.
+Open **Admin → Restaurants** and enter the business address, latitude, longitude, and delivery radius for each restaurant. Customer coordinates are estimated from the submitted city and barangay; the app does not request the phone's live location or send the exact house/street to the geocoder.
 
-Customer coordinates are server-only data and are covered by the onboarding consent notice. Do not expose the Supabase secret key to client components.
+Estimated customer-area coordinates are server-only data and are covered by the onboarding consent notice. Do not expose the Supabase secret key to client components.
 
 ## Validation
 
@@ -84,7 +85,7 @@ Deploy to Vercel or another Node.js-compatible platform and configure all four e
 
 For production:
 
-- Use HTTPS so browser geolocation is available.
+- Keep the OpenStreetMap attribution visible and review Nominatim usage limits before significantly increasing traffic.
 - Use a unique, strong `ADMIN_SESSION_SECRET` and private `ADMIN_PIN`.
 - Keep `SUPABASE_SECRET_KEY` server-only.
 - Confirm Row Level Security and the grants in the migration guide.

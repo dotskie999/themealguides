@@ -11,6 +11,10 @@ function databaseError(error, context) {
   return new Error(`The database could not ${context}.`);
 }
 
+function missingColumn(error, column) {
+  return error?.code === 'PGRST204' && String(error.message || '').includes(`'${column}'`);
+}
+
 function cleanRecord(record = {}) {
   return Object.fromEntries(
     Object.entries(record).map(([key, value]) => [key, value === '' || value === undefined ? null : value]),
@@ -194,9 +198,7 @@ export async function submitOrder(payload = {}) {
     .single();
   if (locationError) throw databaseError(locationError, 'load restaurant location');
   const deliveryDistance = distanceKm(deliveryLatitude, deliveryLongitude, restaurantLocation.latitude, restaurantLocation.longitude);
-  const { data, error } = await supabaseAdmin
-    .from('orders')
-    .insert({
+  const orderRecord = {
       restaurant_id: restaurantId,
       items_json: items,
       subtotal,
@@ -211,12 +213,20 @@ export async function submitOrder(payload = {}) {
       delivery_latitude: Number.isFinite(deliveryLatitude) ? deliveryLatitude : null,
       delivery_longitude: Number.isFinite(deliveryLongitude) ? deliveryLongitude : null,
       distance_km: deliveryDistance === null ? null : Number(deliveryDistance.toFixed(2)),
+      location_source: payload.location_source === 'address' ? 'address' : null,
       status: 'pending',
-    })
+  };
+  let orderResult = await supabaseAdmin
+    .from('orders')
+    .insert(orderRecord)
     .select('order_number,status,timestamp')
     .single();
-  if (error) throw databaseError(error, 'create the order');
-  return { ...data, order_number: String(data.order_number).padStart(4, '0') };
+  if (missingColumn(orderResult.error, 'location_source')) {
+    delete orderRecord.location_source;
+    orderResult = await supabaseAdmin.from('orders').insert(orderRecord).select('order_number,status,timestamp').single();
+  }
+  if (orderResult.error) throw databaseError(orderResult.error, 'create the order');
+  return { ...orderResult.data, order_number: String(orderResult.data.order_number).padStart(4, '0') };
 }
 
 export async function getGuests() {
@@ -258,9 +268,7 @@ export async function saveGuest(payload = {}) {
     .maybeSingle();
   if (readError) throw databaseError(readError, 'find the guest');
 
-  const { data, error } = await supabaseAdmin
-    .from('guests')
-    .upsert({
+  const guestRecord = {
       guest_id: guestId,
       customer_name: customerName,
       customer_email: customerEmail,
@@ -272,13 +280,21 @@ export async function saveGuest(payload = {}) {
       latitude,
       longitude,
       location_accuracy: Number.isFinite(locationAccuracy) ? locationAccuracy : null,
+      location_source: payload.location_source === 'address' ? 'address' : null,
       last_visited_at: new Date().toISOString(),
       visit_count: Number(existing?.visit_count || 0) + (payload.track_visit === false ? 0 : 1),
-    }, { onConflict: 'guest_id' })
+  };
+  let guestResult = await supabaseAdmin
+    .from('guests')
+    .upsert(guestRecord, { onConflict: 'guest_id' })
     .select()
     .single();
-  if (error) throw databaseError(error, 'save guest information');
-  return data;
+  if (missingColumn(guestResult.error, 'location_source')) {
+    delete guestRecord.location_source;
+    guestResult = await supabaseAdmin.from('guests').upsert(guestRecord, { onConflict: 'guest_id' }).select().single();
+  }
+  if (guestResult.error) throw databaseError(guestResult.error, 'save guest information');
+  return guestResult.data;
 }
 
 async function upsert(table, keyField, record, idPrefix) {
