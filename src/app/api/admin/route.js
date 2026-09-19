@@ -9,6 +9,8 @@ const WRITE_ACTIONS = new Set([
   'saveMenuItem',
   'saveOptionGroup',
   'saveOption',
+  'deleteOptionGroup',
+  'deleteOption',
   'updateOrderStatus',
 ]);
 

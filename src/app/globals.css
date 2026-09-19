@@ -401,8 +401,11 @@ textarea { resize:vertical; min-height:88px; }
 .entity-card h3,.compact-entity h3 { font-size:1.1rem; margin:6px 0 4px; }
 .entity-card p,.compact-entity p { color:var(--muted); font-size:.78rem; }
 .entity-card small { color:#a18f81; }
-.entity-card > button,.compact-entity > button { min-height:40px; border:0; border-radius:10px; display:flex; align-items:center; gap:6px; padding:0 10px; background:#f6efe5; color:var(--brown); font-weight:800; cursor:pointer; }
+.entity-card > button,.compact-entity > button,.entity-actions button { min-height:40px; border:0; border-radius:10px; display:flex; align-items:center; justify-content:center; gap:6px; padding:0 10px; background:#f6efe5; color:var(--brown); font-weight:800; cursor:pointer; }
 .entity-card > button svg { width:16px; }
+.entity-actions { display:flex; align-items:center; gap:7px; }
+.entity-actions .delete-entity { width:40px; padding:0; background:#fde8e5; color:#a73529; }
+.entity-actions .delete-entity svg { width:17px; }
 .entity-status { padding:4px 7px; border-radius:999px; background:#eee; color:#777; font-size:.66rem; font-weight:800; text-transform:uppercase; }
 .entity-status.on { background:#e3f2e5; color:var(--green); }
 .addon-columns { display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:start; }
@@ -432,6 +435,16 @@ textarea { resize:vertical; min-height:88px; }
 .admin-form label:has(textarea),.admin-form label:has(input[type=url]) { grid-column:1/-1; }
 .admin-modal footer { padding:15px 20px 20px; display:flex; justify-content:flex-end; gap:10px; }
 .admin-modal footer button { padding:0 18px; }
+.delete-modal { width:min(100%,500px); }
+.delete-modal form { display:block; }
+.delete-modal-body { padding:24px 20px 8px; display:grid; gap:14px; }
+.delete-modal-body > p { color:var(--muted); line-height:1.5; }
+.delete-modal-body > p strong { color:var(--heading); }
+.delete-warning-icon { width:52px; height:52px; display:grid; place-items:center; border-radius:16px; background:#fde8e5; color:#a73529; }
+.delete-cascade-note { padding:11px 13px; border-radius:12px; background:#fff0db; color:#805025!important; font-size:.82rem; }
+.delete-modal-body label { display:grid; gap:7px; color:var(--heading); font-size:.84rem; font-weight:900; }
+.danger-button { min-height:46px; border:0; border-radius:13px; display:flex; align-items:center; justify-content:center; gap:8px; background:#a73529; color:white; font-weight:900; cursor:pointer; }
+.danger-button:disabled { opacity:.6; cursor:not-allowed; }
 
 .admin-login-page { min-height:100vh; padding:24px; display:grid; place-items:center; background:radial-gradient(circle at 20% 10%,#ffc653 0,transparent 34%),linear-gradient(145deg,var(--orange),#ffbd31); }
 .admin-login-card { width:min(100%,430px); padding:32px; border-radius:30px; background:rgba(255,255,255,.95); box-shadow:0 24px 70px rgba(91,45,25,.22); text-align:center; }

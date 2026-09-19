@@ -29,6 +29,10 @@ function bySortOrder(a, b) {
   return Number(a.sort_order || 0) - Number(b.sort_order || 0);
 }
 
+function sameId(left, right) {
+  return String(left ?? '').trim() === String(right ?? '').trim();
+}
+
 async function selectAll(table) {
   const { data, error } = await supabaseAdmin.from(table).select('*');
   if (error) throw databaseError(error, `read ${table}`);
@@ -81,9 +85,9 @@ export async function getMenu(restaurantId) {
     .map((item) => ({
     ...item,
     option_groups: groups
-      .filter((group) => group.category_id
-        ? group.category_id === item.category_id
-        : group.item_id === item.item_id)
+      .filter((group) => group.item_id
+        ? sameId(group.item_id, item.item_id)
+        : sameId(group.category_id, item.category_id))
       .sort(bySortOrder)
       .map((group) => ({ ...group, options: optionsByGroup.get(group.group_id) || [] })),
   }));
@@ -349,6 +353,24 @@ export async function saveOptionGroup(record = {}) {
 }
 export const saveOption = (record) => upsert('options', 'option_id', record, 'opt');
 
+async function deleteAdminRecord(table, keyField, id, pin, label) {
+  if (!verifyAdminPin(pin)) throw new Error('Incorrect admin PIN. Nothing was deleted.');
+  const recordId = String(id || '').trim();
+  if (!recordId) throw new Error(`Choose the ${label} to delete.`);
+  const { data, error } = await supabaseAdmin
+    .from(table)
+    .delete()
+    .eq(keyField, recordId)
+    .select(keyField)
+    .maybeSingle();
+  if (error) throw databaseError(error, `delete the ${label}`);
+  if (!data) throw new Error(`The ${label} no longer exists.`);
+  return { deleted: true, id: recordId };
+}
+
+export const deleteOptionGroup = ({ id, pin } = {}) => deleteAdminRecord('option_groups', 'group_id', id, pin, 'add-on group');
+export const deleteOption = ({ id, pin } = {}) => deleteAdminRecord('options', 'option_id', id, pin, 'choice or extra');
+
 export async function updateOrderStatus(orderNumber, status) {
   if (!ORDER_STATUSES.includes(status)) throw new Error('Invalid order status.');
   const numericOrderNumber = Number(orderNumber);
@@ -397,6 +419,8 @@ export async function apiRequest(action, { params = {}, body = {} } = {}) {
     saveMenuItem: () => saveMenuItem(record),
     saveOptionGroup: () => saveOptionGroup(record),
     saveOption: () => saveOption(record),
+    deleteOptionGroup: () => deleteOptionGroup(body),
+    deleteOption: () => deleteOption(body),
     updateOrderStatus: () => updateOrderStatus(body.order_number, body.new_status || body.status),
   };
   if (!actions[action]) throw new Error(`Unsupported action: ${action}`);
