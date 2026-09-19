@@ -76,7 +76,9 @@ export async function getMenu(restaurantId) {
   }
 
   const groups = groupsResult.data || [];
-  const menuItems = (itemsResult.data || []).map((item) => ({
+  const menuItems = (itemsResult.data || [])
+    .sort((a, b) => bySortOrder(a, b) || String(a.name || '').localeCompare(String(b.name || '')))
+    .map((item) => ({
     ...item,
     option_groups: groups
       .filter((group) => group.category_id
@@ -247,6 +249,7 @@ export async function saveGuest(payload = {}) {
   const city = String(payload.city || '').trim();
   const barangay = String(payload.barangay || '').trim();
   const houseNumber = String(payload.house_number || '').trim();
+  const landmark = String(payload.landmark || '').trim();
   const latitude = payload.latitude === null || payload.latitude === undefined ? null : Number(payload.latitude);
   const longitude = payload.longitude === null || payload.longitude === undefined ? null : Number(payload.longitude);
   const locationAccuracy = payload.location_accuracy === null || payload.location_accuracy === undefined ? null : Number(payload.location_accuracy);
@@ -276,6 +279,7 @@ export async function saveGuest(payload = {}) {
       city,
       barangay,
       house_number: houseNumber,
+      landmark,
       consent_at: payload.consent_at,
       latitude,
       longitude,
@@ -289,8 +293,10 @@ export async function saveGuest(payload = {}) {
     .upsert(guestRecord, { onConflict: 'guest_id' })
     .select()
     .single();
-  if (missingColumn(guestResult.error, 'location_source')) {
-    delete guestRecord.location_source;
+  for (let attempt = 0; attempt < 2 && guestResult.error; attempt += 1) {
+    const unsupportedColumn = ['landmark', 'location_source'].find((column) => missingColumn(guestResult.error, column));
+    if (!unsupportedColumn) break;
+    delete guestRecord[unsupportedColumn];
     guestResult = await supabaseAdmin.from('guests').upsert(guestRecord, { onConflict: 'guest_id' }).select().single();
   }
   if (guestResult.error) throw databaseError(guestResult.error, 'save guest information');
@@ -327,7 +333,20 @@ export async function saveMenuItem(record = {}) {
   return upsert('menu_items', 'item_id', cleaned, 'item');
 }
 
-export const saveOptionGroup = (record) => upsert('option_groups', 'group_id', record, 'og');
+export async function saveOptionGroup(record = {}) {
+  const cleaned = cleanRecord(record);
+  const scope = cleaned.scope === 'item' ? 'item' : 'category';
+  delete cleaned.scope;
+  delete cleaned.scope_category_id;
+  if (scope === 'item') {
+    cleaned.category_id = null;
+    if (!cleaned.item_id) throw new Error('Choose the menu item that should receive this add-on group.');
+  } else {
+    cleaned.item_id = null;
+    if (!cleaned.category_id) throw new Error('Choose the category that should receive this add-on group.');
+  }
+  return upsert('option_groups', 'group_id', cleaned, 'og');
+}
 export const saveOption = (record) => upsert('options', 'option_id', record, 'opt');
 
 export async function updateOrderStatus(orderNumber, status) {

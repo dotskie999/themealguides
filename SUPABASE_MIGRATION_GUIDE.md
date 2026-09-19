@@ -71,7 +71,8 @@ create table public.menu_items (
   photo_url text,
   active text not null default 'yes' check (active in ('yes', 'no')),
   category_id text not null references public.categories(category_id) on delete restrict,
-  description text
+  description text,
+  sort_order integer not null default 0
 );
 
 create index menu_items_restaurant_idx
@@ -144,6 +145,7 @@ create table public.guests (
   city text not null,
   barangay text not null,
   house_number text not null,
+  landmark text,
   latitude double precision check (latitude is null or latitude between -90 and 90),
   longitude double precision check (longitude is null or longitude between -180 and 180),
   location_accuracy double precision,

@@ -7,7 +7,7 @@ import { ArrowRight, Loader2, MapPin, Navigation, ShieldCheck, Sparkles } from '
 import { useGuest } from '@/context/GuestContext';
 
 const initialForm = {
-  city: '', city_code: '', barangay: '', house_number: '',
+  city: '', city_code: '', barangay: '', house_number: '', landmark: '',
   customer_name: '', customer_email: '', contact_number: '+63', consent: false,
   latitude: null, longitude: null, location_accuracy: null, location_source: null,
 };
@@ -119,6 +119,7 @@ export default function GuestGate({ children }) {
           <label><span>City / Municipality</span><select name="city_code" value={form.city_code} onChange={chooseCity} required disabled={loadingLocations && !cities.length}><option value="">{loadingLocations && !cities.length ? 'Loading cities…' : 'Select your city'}</option>{cities.map((city) => <option value={city.code} key={city.code}>{city.name}</option>)}</select></label>
           <label><span>Barangay</span><select name="barangay" value={form.barangay} onChange={update} required disabled={!form.city_code || loadingLocations}><option value="">{loadingLocations && form.city_code ? 'Loading barangays…' : 'Select your barangay'}</option>{barangays.map((barangay) => <option value={barangay.name} key={barangay.code}>{barangay.name}</option>)}</select></label>
           <label className="full"><span>House number / Street</span><input name="house_number" value={form.house_number} onChange={update} placeholder="123 Mabini Street" required /></label>
+          <label className="full"><span>Landmark / address hint <small>Optional</small></span><input name="landmark" value={form.landmark} onChange={update} placeholder="Near the barangay hall, blue gate" /></label>
           <p className="address-location-note full"><MapPin size={17}/><span>Distance is estimated from your selected city and barangay—not your phone&apos;s live location. Your house/street is never sent for map lookup.</span></p>
           {error && <p className="form-error full">{error}</p>}
           <button className="primary-button full" disabled={loadingLocations}>Find food near me <ArrowRight size={19} /></button>
