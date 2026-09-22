@@ -54,7 +54,7 @@ export async function getMenu(restaurantId) {
 
   const [restaurantResult, categoriesResult, itemsResult, groupsResult, optionsResult] = await Promise.all([
     supabaseAdmin.from('restaurants').select('*').eq('restaurant_id', restaurantId).eq('active', 'yes').maybeSingle(),
-    supabaseAdmin.from('categories').select('*').eq('restaurant_id', restaurantId).eq('active', 'yes').order('sort_order'),
+    supabaseAdmin.from('categories').select('*').eq('restaurant_id', restaurantId).eq('active', 'yes').order('sort_order').order('name'),
     supabaseAdmin.from('menu_items').select('*').eq('restaurant_id', restaurantId).eq('active', 'yes'),
     supabaseAdmin.from('option_groups').select('*').order('sort_order'),
     supabaseAdmin.from('options').select('*').order('sort_order'),
@@ -80,8 +80,12 @@ export async function getMenu(restaurantId) {
   }
 
   const groups = groupsResult.data || [];
+  const categoryOrder = new Map((categoriesResult.data || []).map((category, index) => [String(category.category_id), index]));
   const menuItems = (itemsResult.data || [])
-    .sort((a, b) => bySortOrder(a, b) || String(a.name || '').localeCompare(String(b.name || '')))
+    .sort((a, b) => (categoryOrder.get(String(a.category_id)) ?? Number.MAX_SAFE_INTEGER)
+      - (categoryOrder.get(String(b.category_id)) ?? Number.MAX_SAFE_INTEGER)
+      || bySortOrder(a, b)
+      || String(a.name || '').localeCompare(String(b.name || '')))
     .map((item) => ({
     ...item,
     option_groups: groups

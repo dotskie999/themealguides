@@ -88,8 +88,13 @@ h1,h2,h3 { font-family:var(--font-display),sans-serif; color:var(--heading); lin
 .restaurant-location small { color:var(--muted); font-weight:700; }
 .restaurant-location em { color:#9c3124; font-size:.72rem; font-style:normal; text-transform:uppercase; }
 .restaurant-heading .restaurant-location.outside { background:#fde8e5; color:#9c3124; }
-.category-chips { position:sticky; z-index:30; top:0; display:flex; gap:9px; overflow-x:auto; overflow-y:hidden; margin:0 -20px 30px; padding:12px 20px; background:rgba(255,248,232,.96); border-bottom:1px solid rgba(234,223,206,.9); box-shadow:0 8px 18px rgba(91,48,17,.08); backdrop-filter:blur(10px); scrollbar-width:none; }
+.category-slider { position:sticky; z-index:30; top:0; display:grid; grid-template-columns:42px minmax(0,1fr) 42px; align-items:center; gap:7px; margin:0 -20px 30px; padding:8px 12px; background:rgba(255,248,232,.96); border-bottom:1px solid rgba(234,223,206,.9); box-shadow:0 8px 18px rgba(91,48,17,.08); backdrop-filter:blur(10px); }
+.category-chips { min-width:0; display:flex; gap:9px; overflow-x:auto; overflow-y:hidden; padding:4px 1px; scrollbar-width:none; scroll-behavior:smooth; }
+.category-chips::-webkit-scrollbar { display:none; }
 .category-chips a { flex:0 0 auto; min-height:42px; display:flex; align-items:center; padding:0 17px; border-radius:999px; background:white; border:1px solid var(--line); color:var(--brown); text-decoration:none; font-weight:800; }
+.category-arrow { width:42px; height:42px; border:1px solid var(--line); border-radius:50%; display:grid; place-items:center; background:white; color:var(--brown); box-shadow:0 4px 12px rgba(91,48,17,.12); cursor:pointer; }
+.category-arrow:hover { background:var(--orange); color:white; border-color:var(--orange); }
+.category-arrow svg { width:20px; }
 .menu-groups { display:grid; gap:46px; }
 .menu-section { scroll-margin-top:82px; }
 .menu-section-title > span,.block-heading > span { color:var(--muted); font-size:.85rem; font-weight:700; }
@@ -297,8 +302,10 @@ textarea { resize:vertical; min-height:88px; }
   .restaurant-cover .back-link { padding:0 12px; border-radius:999px; background:rgba(255,255,255,.88); }
   .restaurant-heading { margin-bottom:25px; }
   .restaurant-heading h1 { font-size:clamp(2.15rem,11vw,3.4rem); }
-  .category-chips { margin-right:-16px; margin-left:-16px; padding-right:16px; padding-left:16px; scroll-snap-type:x proximity; }
+  .category-slider { grid-template-columns:38px minmax(0,1fr) 38px; gap:5px; margin-right:-16px; margin-left:-16px; padding:8px; }
+  .category-chips { scroll-snap-type:x proximity; }
   .category-chips a { min-height:44px; scroll-snap-align:start; }
+  .category-arrow { width:38px; height:38px; }
   .menu-groups { gap:38px; }
   .menu-card { min-width:0; gap:12px; }
   .menu-card-copy { min-width:0; }

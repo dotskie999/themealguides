@@ -47,7 +47,11 @@ export default function AdminClient() {
   const load = useCallback(async () => { setLoading(true); setError(''); try { let snapshot; try { snapshot = await request('getAdminSnapshot'); } catch { const [orderRows,adminData]=await Promise.all([request('getOrders'),request('getAdminData')]); snapshot={...adminData,orders:orderRows}; } setOrders(Array.isArray(snapshot.orders)?snapshot.orders:[]); setData({ ...emptyData, ...snapshot }); localStorage.setItem(CACHE_KEY,JSON.stringify(snapshot)); } catch(e) { setError(e.message); } finally { setLoading(false); } }, []);
   useEffect(() => { try { const cached=JSON.parse(localStorage.getItem(CACHE_KEY)||'null'); if(cached){setOrders(cached.orders||[]);setData({...emptyData,...cached});setLoading(false);} } catch {} load(); }, [load]);
   const reportOrders = useMemo(() => orders.filter(order => dateKey(order.created_at) === reportDate), [orders,reportDate]);
-  const filteredCategories = useMemo(() => menuRestaurant === 'all' ? data.categories : data.categories.filter(category => String(category.restaurant_id) === menuRestaurant), [data.categories,menuRestaurant]);
+  const filteredCategories = useMemo(() => {
+    const restaurantOrder = new Map(data.restaurants.map((restaurant,index) => [String(restaurant.restaurant_id),index]));
+    const categories = menuRestaurant === 'all' ? data.categories : data.categories.filter(category => String(category.restaurant_id) === menuRestaurant);
+    return categories.slice().sort((a,b) => (restaurantOrder.get(String(a.restaurant_id)) ?? Number.MAX_SAFE_INTEGER) - (restaurantOrder.get(String(b.restaurant_id)) ?? Number.MAX_SAFE_INTEGER) || Number(a.sort_order || 0) - Number(b.sort_order || 0) || String(a.name || '').localeCompare(String(b.name || '')));
+  }, [data.categories,data.restaurants,menuRestaurant]);
   const filteredMenuItems = useMemo(() => {
     const categoryOrder = new Map(data.categories.map(category => [String(category.category_id), Number(category.sort_order || 0)]));
     const restaurantItems = menuRestaurant === 'all' ? data.menuItems : data.menuItems.filter(item => String(item.restaurant_id) === menuRestaurant);

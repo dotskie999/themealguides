@@ -15,4 +15,7 @@ export const supabaseAdmin = createClient(supabaseUrl, supabaseSecretKey, {
     autoRefreshToken: false,
     detectSessionInUrl: false,
   },
+  global: {
+    fetch: (url, options = {}) => fetch(url, { ...options, cache: 'no-store' }),
+  },
 });
