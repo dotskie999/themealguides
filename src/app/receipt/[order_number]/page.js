@@ -5,9 +5,10 @@ import { Check, ChefHat, Download, ReceiptText } from 'lucide-react';
 import Image from 'next/image';
 import { useCart } from '@/context/CartContext';
 import FacebookLink from '@/components/FacebookLink';
+import { marketMoney, normalizeMarketCode } from '@/lib/markets';
 
-const money = (value) => `₱${Number(value || 0).toFixed(2)}`;
 function downloadReceipt(order, number) {
+  const money=(value)=>marketMoney(value,normalizeMarketCode(order?.market_code));
   const width = 1080;
   const itemCount = Math.max(order?.items?.length || 0, 1);
   const height = 780 + itemCount * 105;
@@ -51,6 +52,7 @@ export default function ReceiptPage({ params }) {
   const { getSavedOrder } = useCart();
   const [order, setOrder] = useState(null);
   const number = decodeURIComponent(params.order_number);
+  const money=(value)=>marketMoney(value,normalizeMarketCode(order?.market_code));
   useEffect(() => {
     const saved = getSavedOrder();
     setOrder(String(saved?.order_number) === number ? saved : null);

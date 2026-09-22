@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { DEFAULT_MARKET, getMarket, normalizeMarketCode } from '@/lib/markets';
 
 const GuestContext = createContext(null);
 export const GUEST_KEY = 'tmg-guest-v1';
@@ -24,8 +25,11 @@ export function GuestProvider({ children }) {
     try {
       const stored = JSON.parse(localStorage.getItem(GUEST_KEY) || 'null');
       if (stored?.guest_id && stored?.consent_at) {
-        const safeStored = stored.location_source === 'address' ? stored : {
-          ...stored,
+        const marketCode = normalizeMarketCode(stored.market_code || DEFAULT_MARKET);
+        const market = getMarket(marketCode);
+        const migratedStored = { ...stored, market_code:marketCode, country_code:stored.country_code || market.countryCode };
+        const safeStored = migratedStored.location_source === 'address' ? migratedStored : {
+          ...migratedStored,
           latitude: null,
           longitude: null,
           location_accuracy: null,
@@ -40,7 +44,7 @@ export function GuestProvider({ children }) {
               const response = await fetch('/api/geocode', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ city: safeStored.city, barangay: safeStored.barangay }),
+                body: JSON.stringify({ city: safeStored.city, barangay: safeStored.barangay, market_code:safeStored.market_code }),
               });
               const result = await response.json();
               if (response.ok && result.location) refreshed = {

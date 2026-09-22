@@ -3,6 +3,7 @@ import 'server-only';
 import crypto from 'crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { distanceKm } from '@/lib/distance';
+import { getMarket, normalizeMarketCode } from '@/lib/markets';
 
 const ORDER_STATUSES = ['pending', 'confirmed', 'preparing', 'ready', 'completed', 'cancelled'];
 
@@ -199,6 +200,8 @@ export async function submitOrder(payload = {}) {
 
   const items = await buildOrderItems(restaurantId, requestedItems);
   const subtotal = items.reduce((sum, item) => sum + item.total_price, 0);
+  const marketCode = normalizeMarketCode(payload.market_code);
+  const market = getMarket(marketCode);
   const deliveryLatitude = payload.latitude === null || payload.latitude === undefined ? null : Number(payload.latitude);
   const deliveryLongitude = payload.longitude === null || payload.longitude === undefined ? null : Number(payload.longitude);
   const { data: restaurantLocation, error: locationError } = await supabaseAdmin
@@ -219,6 +222,10 @@ export async function submitOrder(payload = {}) {
       barangay: String(payload.barangay).trim(),
       house_number: String(payload.house_number).trim(),
       landmark: String(payload.landmark || '').trim(),
+      digital_address: String(payload.digital_address || '').trim(),
+      market_code: marketCode,
+      country_code: market.countryCode,
+      currency_code: market.currency,
       order_remarks: String(payload.order_remarks || '').trim(),
       delivery_latitude: Number.isFinite(deliveryLatitude) ? deliveryLatitude : null,
       delivery_longitude: Number.isFinite(deliveryLongitude) ? deliveryLongitude : null,
@@ -231,9 +238,11 @@ export async function submitOrder(payload = {}) {
     .insert(orderRecord)
     .select('order_number,status,timestamp')
     .single();
-  if (missingColumn(orderResult.error, 'location_source')) {
-    delete orderRecord.location_source;
-    orderResult = await supabaseAdmin.from('orders').insert(orderRecord).select('order_number,status,timestamp').single();
+  for(let attempt=0;attempt<5&&orderResult.error;attempt+=1){
+    const unsupported=['digital_address','market_code','country_code','currency_code','location_source'].find((column)=>missingColumn(orderResult.error,column));
+    if(!unsupported) break;
+    delete orderRecord[unsupported];
+    orderResult=await supabaseAdmin.from('orders').insert(orderRecord).select('order_number,status,timestamp').single();
   }
   if (orderResult.error) throw databaseError(orderResult.error, 'create the order');
   return { ...orderResult.data, order_number: String(orderResult.data.order_number).padStart(4, '0') };
@@ -258,6 +267,9 @@ export async function saveGuest(payload = {}) {
   const barangay = String(payload.barangay || '').trim();
   const houseNumber = String(payload.house_number || '').trim();
   const landmark = String(payload.landmark || '').trim();
+  const digitalAddress = String(payload.digital_address || '').trim();
+  const marketCode = normalizeMarketCode(payload.market_code);
+  const market = getMarket(marketCode);
   const latitude = payload.latitude === null || payload.latitude === undefined ? null : Number(payload.latitude);
   const longitude = payload.longitude === null || payload.longitude === undefined ? null : Number(payload.longitude);
   const locationAccuracy = payload.location_accuracy === null || payload.location_accuracy === undefined ? null : Number(payload.location_accuracy);
@@ -265,7 +277,8 @@ export async function saveGuest(payload = {}) {
   if (!/^[0-9a-f-]{36}$/i.test(guestId)) throw new Error('Invalid guest identifier.');
   if (!customerName || !city || !barangay || !houseNumber) throw new Error('Please complete all guest details.');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) throw new Error('Enter a valid email address.');
-  if (!/^\+63\d{10}$/.test(contactNumber)) throw new Error('Enter a valid Philippine contact number.');
+  const validPhone=market.countryCode==='GH'?/^\+233\d{9}$/.test(contactNumber):/^\+63\d{10}$/.test(contactNumber);
+  if (!validPhone) throw new Error(`Enter a valid ${market.country} contact number.`);
   if (!payload.consent_at) throw new Error('Consent is required before guest details can be saved.');
   if ((latitude !== null && (!Number.isFinite(latitude) || latitude < -90 || latitude > 90))
     || (longitude !== null && (!Number.isFinite(longitude) || longitude < -180 || longitude > 180))) {
@@ -288,6 +301,9 @@ export async function saveGuest(payload = {}) {
       barangay,
       house_number: houseNumber,
       landmark,
+      digital_address: digitalAddress,
+      market_code: marketCode,
+      country_code: market.countryCode,
       consent_at: payload.consent_at,
       latitude,
       longitude,
@@ -301,8 +317,8 @@ export async function saveGuest(payload = {}) {
     .upsert(guestRecord, { onConflict: 'guest_id' })
     .select()
     .single();
-  for (let attempt = 0; attempt < 2 && guestResult.error; attempt += 1) {
-    const unsupportedColumn = ['landmark', 'location_source'].find((column) => missingColumn(guestResult.error, column));
+  for (let attempt = 0; attempt < 5 && guestResult.error; attempt += 1) {
+    const unsupportedColumn = ['digital_address','market_code','country_code','landmark','location_source'].find((column) => missingColumn(guestResult.error, column));
     if (!unsupportedColumn) break;
     delete guestRecord[unsupportedColumn];
     guestResult = await supabaseAdmin.from('guests').upsert(guestRecord, { onConflict: 'guest_id' }).select().single();

@@ -5,9 +5,9 @@ import Image from 'next/image';
 import { Check, ChevronLeft, ChevronRight, Minus, Plus, ShoppingBag, X } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { normalizeImageUrl } from '@/lib/images';
+import { marketMoney, normalizeMarketCode } from '@/lib/markets';
 
-const money = (value) => `₱${Number(value || 0).toFixed(2)}`;
-export default function MenuClient({ items, restaurantId, restaurantName, restaurantSlug }) {
+export default function MenuClient({ items, restaurantId, restaurantName, restaurantSlug, marketCode }) {
   const [selectedItem, setSelectedItem] = useState(null);
   const [selections, setSelections] = useState({});
   const [quantity, setQuantity] = useState(1);
@@ -15,6 +15,8 @@ export default function MenuClient({ items, restaurantId, restaurantName, restau
   const [error, setError] = useState('');
   const categoryScroller = useRef(null);
   const { addItem } = useCart();
+  const normalizedMarket=normalizeMarketCode(marketCode);
+  const money=(value)=>marketMoney(value,normalizedMarket);
   const grouped = useMemo(() => items.reduce((acc, item) => { const key = item.category || 'Favorites'; (acc[key] ||= []).push(item); return acc; }, {}), [items]);
   useEffect(() => { if (!selectedItem) return; const close = (event) => event.key === 'Escape' && setSelectedItem(null); document.body.style.overflow = 'hidden'; window.addEventListener('keydown', close); return () => { document.body.style.overflow = ''; window.removeEventListener('keydown', close); }; }, [selectedItem]);
   const optionTotal = selectedItem ? Object.values(selections).flat().reduce((sum, option) => sum + Number(option.price || 0), 0) : 0;
@@ -22,7 +24,7 @@ export default function MenuClient({ items, restaurantId, restaurantName, restau
   const openItem = (item) => { setSelectedItem(item); setSelections({}); setQuantity(1); setRemarks(''); setError(''); };
   const chooseOption = (group, option) => { setError(''); setSelections((current) => { if (group.selection_type === 'single') return { ...current, [group.group_id]: [option] }; const chosen = current[group.group_id] || []; return { ...current, [group.group_id]: chosen.some((entry) => String(entry.option_id) === String(option.option_id)) ? chosen.filter((entry) => String(entry.option_id) !== String(option.option_id)) : [...chosen, option] }; }); };
   const scrollCategories = (direction) => { const scroller=categoryScroller.current; if(!scroller) return; scroller.scrollBy({left:direction*Math.max(240,scroller.clientWidth*.72),behavior:'smooth'}); };
-  const addToCart = () => { const missing = (selectedItem.option_groups || []).find((group) => group.required === 'yes' && !(selections[group.group_id] || []).length); if (missing) { setError(`Please choose an option for ${missing.group_name}.`); return; } const added = addItem({ restaurant_id: restaurantId, restaurant_name: restaurantName, restaurant_slug: restaurantSlug, item_id: selectedItem.item_id, name: selectedItem.name, base_price: Number(selectedItem.base_price), quantity, selected_options: Object.values(selections).flat(), remarks, unit_price: unitPrice, total_price: unitPrice * quantity }); if (!added) { setError('Your cart contains food from another kitchen. Complete that order first.'); return; } setSelectedItem(null); };
+  const addToCart = () => { const missing = (selectedItem.option_groups || []).find((group) => group.required === 'yes' && !(selections[group.group_id] || []).length); if (missing) { setError(`Please choose an option for ${missing.group_name}.`); return; } const added = addItem({ restaurant_id: restaurantId, restaurant_name: restaurantName, restaurant_slug: restaurantSlug, market_code:normalizedMarket, item_id: selectedItem.item_id, name: selectedItem.name, base_price: Number(selectedItem.base_price), quantity, selected_options: Object.values(selections).flat(), remarks, unit_price: unitPrice, total_price: unitPrice * quantity }); if (!added) { setError('Your cart contains food from another kitchen. Complete that order first.'); return; } setSelectedItem(null); };
 
   return <>
     <div className="category-slider"><button className="category-arrow" onClick={()=>scrollCategories(-1)} aria-label="Show previous categories"><ChevronLeft/></button><nav className="category-chips" ref={categoryScroller} aria-label="Menu categories">{Object.keys(grouped).map((category) => <a href={`#${encodeURIComponent(category)}`} key={category}>{category}</a>)}</nav><button className="category-arrow" onClick={()=>scrollCategories(1)} aria-label="Show more categories"><ChevronRight/></button></div>

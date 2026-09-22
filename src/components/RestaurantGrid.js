@@ -8,17 +8,25 @@ import { useGuest } from '@/context/GuestContext';
 import { distanceKm, formatDistance, formatTravelEstimate } from '@/lib/distance';
 import { normalizeImageUrl } from '@/lib/images';
 import { restaurantCity, restaurantSlug } from '@/lib/restaurant';
+import { DEFAULT_MARKET, getMarket, normalizeMarketCode } from '@/lib/markets';
 
 export default function RestaurantGrid({ restaurants }) {
   const { guest } = useGuest();
-  const rows = useMemo(() => restaurants.map((restaurant) => ({
+  const marketCode=normalizeMarketCode(guest?.market_code||DEFAULT_MARKET);
+  const rows = useMemo(() => restaurants.filter((restaurant)=>normalizeMarketCode(restaurant.market_code)===marketCode).map((restaurant) => ({
     ...restaurant,
     distance: distanceKm(guest?.latitude, guest?.longitude, restaurant.latitude, restaurant.longitude),
   })).sort((a, b) => {
+    const aPosition = Number(a.sort_order) > 0 ? Number(a.sort_order) : Number.MAX_SAFE_INTEGER;
+    const bPosition = Number(b.sort_order) > 0 ? Number(b.sort_order) : Number.MAX_SAFE_INTEGER;
+    if (aPosition !== bPosition) return aPosition - bPosition;
+    if (a.distance === null && b.distance === null) return String(a.name || '').localeCompare(String(b.name || ''));
     if (a.distance === null) return 1;
     if (b.distance === null) return -1;
-    return a.distance - b.distance;
-  }), [guest?.latitude, guest?.longitude, restaurants]);
+    return a.distance - b.distance || String(a.name || '').localeCompare(String(b.name || ''));
+  }), [guest?.latitude, guest?.longitude, marketCode, restaurants]);
+
+  if(!rows.length) return <div className="state-card"><ChefHat size={34}/><h3>No kitchens are serving in {getMarket(marketCode).region} yet.</h3><p>This market is ready for testing. Assign a restaurant to it from the admin dashboard.</p></div>;
 
   return <div className="restaurant-grid">{rows.map((restaurant, index) => {
     const radius = Number(restaurant.delivery_radius_km || 0);
