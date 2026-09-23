@@ -9,22 +9,31 @@ function secret() {
   return globalThis.__tmgAdminSessionSecret;
 }
 
-function signature(expiresAt) {
-  return crypto.createHmac('sha256', secret()).update(String(expiresAt)).digest('hex');
+function sign(payload) {
+  return crypto.createHmac('sha256', secret()).update(payload).digest('base64url');
 }
 
-export function createAdminToken() {
-  const expiresAt = Date.now() + MAX_AGE_SECONDS * 1000;
-  return `${expiresAt}.${signature(expiresAt)}`;
+export function createAdminToken(session = {}) {
+  const payload = Buffer.from(JSON.stringify({
+    type: session.type === 'emergency' ? 'emergency' : 'account',
+    userId: session.userId || null,
+    expiresAt: Date.now() + MAX_AGE_SECONDS * 1000,
+  })).toString('base64url');
+  return `${payload}.${sign(payload)}`;
 }
 
 export function verifyAdminToken(token) {
-  if (!token) return false;
-  const [expiresAt, supplied] = String(token).split('.');
-  if (!expiresAt || !supplied || Number(expiresAt) <= Date.now()) return false;
-  const expected = signature(expiresAt);
-  if (supplied.length !== expected.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
+  if (!token) return null;
+  const [payload, supplied] = String(token).split('.');
+  if (!payload || !supplied) return null;
+  const expected = sign(payload);
+  if (supplied.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) return null;
+  try {
+    const session = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!session.expiresAt || Number(session.expiresAt) <= Date.now()) return null;
+    if (session.type === 'account' && !session.userId) return null;
+    return session;
+  } catch { return null; }
 }
 
 export const adminCookieOptions = {

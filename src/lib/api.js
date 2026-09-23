@@ -4,6 +4,8 @@ import crypto from 'crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { distanceKm } from '@/lib/distance';
 import { getMarket, normalizeMarketCode } from '@/lib/markets';
+import { calculateDeliveryQuote, DEFAULT_DELIVERY_SETTINGS, normalizeDeliverySettings } from '@/lib/delivery';
+import { geocodeDeliveryArea } from '@/lib/geocode';
 
 const ORDER_STATUSES = ['pending', 'confirmed', 'preparing', 'ready', 'completed', 'cancelled'];
 
@@ -48,6 +50,40 @@ export async function getRestaurants() {
     .order('name');
   if (error) throw databaseError(error, 'load restaurants');
   return data || [];
+}
+
+export async function getDeliverySettings() {
+  const {data,error}=await supabaseAdmin.from('delivery_settings').select('*').eq('market_code','ph-ncr').maybeSingle();
+  if(error&&['42P01','PGRST205'].includes(error.code)) return DEFAULT_DELIVERY_SETTINGS;
+  if(error) throw databaseError(error,'load delivery settings');
+  return normalizeDeliverySettings(data||DEFAULT_DELIVERY_SETTINGS);
+}
+
+export async function saveDeliverySettings(record = {}) {
+  const settings=normalizeDeliverySettings({...record,market_code:'ph-ncr'});
+  for(const key of ['base_distance_km','base_fare','additional_per_km','max_internal_distance_km','peak_surcharge','storm_surcharge']){
+    if(!Number.isFinite(Number(settings[key]))||Number(settings[key])<0) throw new Error('Delivery amounts and distances must be valid positive numbers.');
+  }
+  if(settings.max_internal_distance_km<=settings.base_distance_km) throw new Error('Maximum fleet distance must be greater than the base distance.');
+  const {data,error}=await supabaseAdmin.from('delivery_settings').upsert({...settings,updated_at:new Date().toISOString()},{onConflict:'market_code'}).select().single();
+  if(error) throw databaseError(error,'save delivery settings');
+  return data;
+}
+
+export async function getDeliveryQuote(payload = {}) {
+  const fulfillmentType=payload.fulfillment_type==='pickup'?'pickup':'doorstep';
+  const marketCode=normalizeMarketCode(payload.market_code);
+  const latitude=payload.latitude===null||payload.latitude===undefined?null:Number(payload.latitude);
+  const longitude=payload.longitude===null||payload.longitude===undefined?null:Number(payload.longitude);
+  let deliveryDistance=null;
+  if(fulfillmentType==='doorstep'&&marketCode==='ph-ncr'&&payload.location_source!=='map_pin'){
+    if(!payload.restaurant_id) throw new Error('A restaurant is required for a delivery quote.');
+    const {data:restaurant,error}=await supabaseAdmin.from('restaurants').select('latitude,longitude').eq('restaurant_id',payload.restaurant_id).single();
+    if(error) throw databaseError(error,'load restaurant location');
+    deliveryDistance=distanceKm(latitude,longitude,restaurant.latitude,restaurant.longitude);
+  }
+  const settings=await getDeliverySettings();
+  return {...calculateDeliveryQuote({marketCode,fulfillmentType,distanceKm:deliveryDistance,settings}),settings};
 }
 
 export async function getMenu(restaurantId) {
@@ -202,8 +238,15 @@ export async function submitOrder(payload = {}) {
   const subtotal = items.reduce((sum, item) => sum + item.total_price, 0);
   const marketCode = normalizeMarketCode(payload.market_code);
   const market = getMarket(marketCode);
-  const deliveryLatitude = payload.latitude === null || payload.latitude === undefined ? null : Number(payload.latitude);
-  const deliveryLongitude = payload.longitude === null || payload.longitude === undefined ? null : Number(payload.longitude);
+  const fulfillmentType=payload.fulfillment_type==='pickup'?'pickup':'doorstep';
+  let deliveryLatitude = payload.latitude === null || payload.latitude === undefined ? null : Number(payload.latitude);
+  let deliveryLongitude = payload.longitude === null || payload.longitude === undefined ? null : Number(payload.longitude);
+  if(fulfillmentType==='doorstep'&&marketCode==='ph-ncr'){
+    const geocoded=await geocodeDeliveryArea(payload.city,payload.barangay,marketCode,payload.house_number,payload.landmark);
+    if(!geocoded) throw new Error('We could not locate this delivery address. Please review it or select pickup.');
+    deliveryLatitude=Number(geocoded.latitude);
+    deliveryLongitude=Number(geocoded.longitude);
+  }
   const { data: restaurantLocation, error: locationError } = await supabaseAdmin
     .from('restaurants')
     .select('latitude,longitude')
@@ -211,10 +254,20 @@ export async function submitOrder(payload = {}) {
     .single();
   if (locationError) throw databaseError(locationError, 'load restaurant location');
   const deliveryDistance = distanceKm(deliveryLatitude, deliveryLongitude, restaurantLocation.latitude, restaurantLocation.longitude);
+  const deliverySettings=await getDeliverySettings();
+  const deliveryQuote=calculateDeliveryQuote({marketCode,fulfillmentType,distanceKm:deliveryDistance,settings:deliverySettings});
+  if(fulfillmentType==='doorstep'&&marketCode==='ph-ncr'&&deliveryQuote.delivery_fee===null) throw new Error('We could not calculate the delivery distance. Please review the address or select pickup.');
+  const deliveryFee=Number(deliveryQuote.delivery_fee||0);
+  const orderTotal=Number((subtotal+deliveryFee).toFixed(2));
   const orderRecord = {
       restaurant_id: restaurantId,
       items_json: items,
       subtotal,
+      fulfillment_type:fulfillmentType,
+      delivery_fee:deliveryFee,
+      order_total:orderTotal,
+      delivery_provider:deliveryQuote.provider,
+      delivery_fee_breakdown:deliveryQuote,
       customer_name: String(payload.customer_name).trim(),
       customer_email: String(payload.customer_email || '').trim() || null,
       contact_number: String(payload.contact_number).trim(),
@@ -230,7 +283,7 @@ export async function submitOrder(payload = {}) {
       delivery_latitude: Number.isFinite(deliveryLatitude) ? deliveryLatitude : null,
       delivery_longitude: Number.isFinite(deliveryLongitude) ? deliveryLongitude : null,
       distance_km: deliveryDistance === null ? null : Number(deliveryDistance.toFixed(2)),
-      location_source: payload.location_source === 'address' ? 'address' : null,
+      location_source: ['address','map_pin'].includes(payload.location_source) ? payload.location_source : null,
       status: 'pending',
   };
   let orderResult = await supabaseAdmin
@@ -238,14 +291,14 @@ export async function submitOrder(payload = {}) {
     .insert(orderRecord)
     .select('order_number,status,timestamp')
     .single();
-  for(let attempt=0;attempt<5&&orderResult.error;attempt+=1){
-    const unsupported=['digital_address','market_code','country_code','currency_code','location_source'].find((column)=>missingColumn(orderResult.error,column));
+  for(let attempt=0;attempt<10&&orderResult.error;attempt+=1){
+    const unsupported=['delivery_fee_breakdown','delivery_provider','order_total','delivery_fee','fulfillment_type','digital_address','market_code','country_code','currency_code','location_source'].find((column)=>missingColumn(orderResult.error,column));
     if(!unsupported) break;
     delete orderRecord[unsupported];
     orderResult=await supabaseAdmin.from('orders').insert(orderRecord).select('order_number,status,timestamp').single();
   }
   if (orderResult.error) throw databaseError(orderResult.error, 'create the order');
-  return { ...orderResult.data, order_number: String(orderResult.data.order_number).padStart(4, '0') };
+  return { ...orderResult.data, order_number: String(orderResult.data.order_number).padStart(4, '0'), subtotal, fulfillment_type:fulfillmentType, delivery_fee:deliveryFee, order_total:orderTotal, delivery_provider:deliveryQuote.provider, delivery_fee_breakdown:deliveryQuote };
 }
 
 export async function getGuests() {
@@ -308,7 +361,7 @@ export async function saveGuest(payload = {}) {
       latitude,
       longitude,
       location_accuracy: Number.isFinite(locationAccuracy) ? locationAccuracy : null,
-      location_source: payload.location_source === 'address' ? 'address' : null,
+      location_source: ['address','map_pin'].includes(payload.location_source) ? payload.location_source : null,
       last_visited_at: new Date().toISOString(),
       visit_count: Number(existing?.visit_count || 0) + (payload.track_visit === false ? 0 : 1),
   };
@@ -373,8 +426,7 @@ export async function saveOptionGroup(record = {}) {
 }
 export const saveOption = (record) => upsert('options', 'option_id', record, 'opt');
 
-async function deleteAdminRecord(table, keyField, id, pin, label) {
-  if (!verifyAdminPin(pin)) throw new Error('Incorrect admin PIN. Nothing was deleted.');
+async function deleteAdminRecord(table, keyField, id, label) {
   const recordId = String(id || '').trim();
   if (!recordId) throw new Error(`Choose the ${label} to delete.`);
   const { data, error } = await supabaseAdmin
@@ -388,8 +440,8 @@ async function deleteAdminRecord(table, keyField, id, pin, label) {
   return { deleted: true, id: recordId };
 }
 
-export const deleteOptionGroup = ({ id, pin } = {}) => deleteAdminRecord('option_groups', 'group_id', id, pin, 'add-on group');
-export const deleteOption = ({ id, pin } = {}) => deleteAdminRecord('options', 'option_id', id, pin, 'choice or extra');
+export const deleteOptionGroup = ({ id } = {}) => deleteAdminRecord('option_groups', 'group_id', id, 'add-on group');
+export const deleteOption = ({ id } = {}) => deleteAdminRecord('options', 'option_id', id, 'choice or extra');
 
 export async function updateOrderStatus(orderNumber, status) {
   if (!ORDER_STATUSES.includes(status)) throw new Error('Invalid order status.');
@@ -433,12 +485,14 @@ export async function apiRequest(action, { params = {}, body = {} } = {}) {
     getOrders: () => getOrders(params.status || body.status),
     getAdminData: () => getAdminData(),
     getAdminSnapshot: () => getAdminSnapshot(),
+    getDeliverySettings: () => getDeliverySettings(),
     submitOrder: () => submitOrder(body),
     saveRestaurant: () => saveRestaurant(record),
     saveCategory: () => saveCategory(record),
     saveMenuItem: () => saveMenuItem(record),
     saveOptionGroup: () => saveOptionGroup(record),
     saveOption: () => saveOption(record),
+    saveDeliverySettings: () => saveDeliverySettings(record),
     deleteOptionGroup: () => deleteOptionGroup(body),
     deleteOption: () => deleteOption(body),
     updateOrderStatus: () => updateOrderStatus(body.order_number, body.new_status || body.status),

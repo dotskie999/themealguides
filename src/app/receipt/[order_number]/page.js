@@ -11,7 +11,7 @@ function downloadReceipt(order, number) {
   const money=(value)=>marketMoney(value,normalizeMarketCode(order?.market_code));
   const width = 1080;
   const itemCount = Math.max(order?.items?.length || 0, 1);
-  const height = 780 + itemCount * 105;
+  const height = 900 + itemCount * 105;
   const canvas = document.createElement('canvas');
   canvas.width = width; canvas.height = height;
   const context = canvas.getContext('2d');
@@ -39,8 +39,14 @@ function downloadReceipt(order, number) {
     y += 105;
   }
   context.strokeStyle = '#eadfce'; context.lineWidth = 3; context.beginPath(); context.moveTo(80, y - 35); context.lineTo(width - 80, y - 35); context.stroke();
-  context.fillStyle = '#8b4513'; context.font = 'bold 34px Arial'; context.fillText('TOTAL', 90, y + 25);
-  context.textAlign = 'right'; context.fillText(money(order?.subtotal), width - 90, y + 25);
+  const deliveryLabel = order?.delivery_provider === 'lalamove' ? 'Delivery (Lalamove quote)' : 'Delivery fee';
+  const total = order?.order_total ?? order?.subtotal;
+  context.fillStyle = '#31251f'; context.font = '24px Arial'; context.fillText('Subtotal', 90, y + 20);
+  context.textAlign = 'right'; context.fillText(money(order?.subtotal), width - 90, y + 20);
+  context.textAlign = 'left'; context.fillText(deliveryLabel, 90, y + 62);
+  context.textAlign = 'right'; context.fillText(order?.delivery_provider === 'lalamove' ? 'Quoted separately' : money(order?.delivery_fee || 0), width - 90, y + 62);
+  context.textAlign = 'left'; context.fillStyle = '#8b4513'; context.font = 'bold 34px Arial'; context.fillText('TOTAL', 90, y + 118);
+  context.textAlign = 'right'; context.fillText(money(total), width - 90, y + 118);
   context.textAlign = 'center'; context.fillStyle = '#6d351d'; context.font = '22px Arial';
   context.fillText('Thank you for ordering with The Meal Guides.', width / 2, height - 75);
   const link = document.createElement('a');
@@ -58,6 +64,6 @@ export default function ReceiptPage({ params }) {
     setOrder(String(saved?.order_number) === number ? saved : null);
   }, [getSavedOrder, number]);
   return <main className="receipt-page"><section className="receipt-card"><Image className="receipt-logo" src="/the-meal-guides-logo.png" alt="The Meal Guides" width={110} height={73} /><div className="success-mark"><Check size={40} /></div><p className="kicker">Order received</p><h1>You&apos;re all set!</h1><p className="receipt-intro">We&apos;ve sent your order to the kitchen. Keep this screen handy.</p><div className="order-ticket"><span>Order number</span><strong>{number}</strong><div className="status-pill"><i /> Pending payment</div></div>
-    {order && <div className="receipt-items"><div className="receipt-title"><ReceiptText /><h2>Order summary</h2></div>{order.items?.map((item) => <div className="receipt-item" key={item.cart_id}><span>{item.quantity}×</span><div><strong>{item.name}</strong>{item.selected_options?.length > 0 && <small>{item.selected_options.map((option) => option.option_name).join(', ')}</small>}</div><b>{money(item.total_price)}</b></div>)}<div className="receipt-total"><span>Total</span><strong>{money(order.subtotal)}</strong></div></div>}
-    <div className="cashier-note"><ChefHat /><div><strong>Next stop: the cashier</strong><p>Show this screen to the cashier to settle your payment.</p></div></div><div className="receipt-actions"><button className="primary-button" onClick={() => downloadReceipt(order, number)} disabled={!order}><Download size={19} /> Download receipt as PNG</button><FacebookLink /></div><Link href="/" className="secondary-button">Order something else</Link></section><p className="tiny-footer">Thank you for ordering with The Meal Guides.</p></main>;
+    {order && <div className="receipt-items"><div className="receipt-title"><ReceiptText /><h2>Order summary</h2></div>{order.items?.map((item) => <div className="receipt-item" key={item.cart_id}><span>{item.quantity}×</span><div><strong>{item.name}</strong>{item.selected_options?.length > 0 && <small>{item.selected_options.map((option) => option.option_name).join(', ')}</small>}</div><b>{money(item.total_price)}</b></div>)}<div className="receipt-breakdown"><div><span>Subtotal</span><strong>{money(order.subtotal)}</strong></div><div><span>Delivery fee</span><strong>{order.delivery_provider === 'lalamove' ? 'Quoted separately' : money(order.delivery_fee || 0)}</strong></div>{order.delivery_provider === 'lalamove' && <small>Your address is outside the internal fleet area. Lalamove delivery is arranged and paid separately.</small>}<div className="receipt-total"><span>Total</span><strong>{money(order.order_total ?? order.subtotal)}</strong></div></div></div>}
+    <div className="cashier-note"><ChefHat /><div><strong>Next stop: Payment</strong><p>Show this screen to the cashier or send it via messenger to settle your payment.</p></div></div><div className="receipt-actions"><button className="primary-button" onClick={() => downloadReceipt(order, number)} disabled={!order}><Download size={19} /> Download receipt as PNG</button><FacebookLink /></div><Link href="/" className="secondary-button">Order something else</Link></section><p className="tiny-footer">Thank you for ordering with The Meal Guides.</p></main>;
 }

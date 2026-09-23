@@ -28,7 +28,7 @@ export function GuestProvider({ children }) {
         const marketCode = normalizeMarketCode(stored.market_code || DEFAULT_MARKET);
         const market = getMarket(marketCode);
         const migratedStored = { ...stored, market_code:marketCode, country_code:stored.country_code || market.countryCode };
-        const safeStored = migratedStored.location_source === 'address' ? migratedStored : {
+        const safeStored = ['address','map_pin'].includes(migratedStored.location_source) ? migratedStored : {
           ...migratedStored,
           latitude: null,
           longitude: null,
@@ -39,7 +39,7 @@ export function GuestProvider({ children }) {
         localStorage.setItem(GUEST_KEY, JSON.stringify(safeStored));
         (async () => {
           let refreshed = safeStored;
-          if (safeStored.location_source !== 'address' && safeStored.city && safeStored.barangay) {
+          if (!['address','map_pin'].includes(safeStored.location_source) && safeStored.city && safeStored.barangay) {
             try {
               const response = await fetch('/api/geocode', {
                 method: 'POST',
