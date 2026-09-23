@@ -68,6 +68,12 @@ h1,h2,h3 { font-family:var(--font-display),sans-serif; color:var(--heading); lin
 .profile-form { padding:20px; display:grid; grid-template-columns:1fr 1fr; gap:13px; }
 .profile-form label { display:grid; gap:7px; color:var(--heading); font-size:.84rem; font-weight:900; }
 .profile-form select { width:100%; min-height:52px; padding:0 12px; border:1.5px solid var(--line); border-radius:13px; background:white; color:var(--ink); }
+.profile-form .locked-market > span { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.profile-form .locked-market > span small { display:inline-flex; align-items:center; gap:4px; color:var(--green); font-size:.68rem; }
+.profile-form .locked-market select:disabled { opacity:1; border-color:#d6c49e; background:#f6f0e2; color:var(--heading); cursor:not-allowed; }
+.profile-form .locked-market > em { color:var(--muted); font-size:.68rem; font-style:normal; font-weight:600; line-height:1.4; }
+.profile-market-lock-note { margin:0; padding:10px 12px; display:flex; align-items:center; gap:8px; border-radius:12px; background:#edf5e9; color:var(--green); font-size:.72rem; font-weight:800; line-height:1.4; }
+.profile-market-lock-note svg { flex:0 0 auto; }
 .profile-form .full { grid-column:1/-1; }
 .profile-privacy { padding:11px 12px; display:flex; align-items:flex-start; gap:8px; border-radius:13px; background:#fff1cb; color:var(--brown); font-size:.73rem; line-height:1.45; }
 .profile-privacy svg { flex:0 0 auto; }
@@ -245,6 +251,17 @@ textarea { resize:vertical; min-height:88px; }
 .market-picker > button strong { font-size:1rem; }
 .market-picker > button small { color:var(--muted); font-weight:700; }
 .market-picker > button svg { width:19px; color:var(--orange-deep); }
+.market-detection { margin-bottom:17px; padding:13px 14px; display:grid; grid-template-columns:28px minmax(0,1fr) auto; align-items:center; gap:10px; border:1px solid var(--line); border-radius:15px; background:#fff8e8; color:var(--brown); }
+.market-detection.requesting { border-color:#efb536; background:#fff1c8; }
+.market-detection.denied,.market-detection.unavailable,.market-detection.outside { border-color:#efc8bd; background:#fff0eb; }
+.market-detection > svg { color:var(--orange-deep); }
+.market-detection div { display:grid; gap:3px; }
+.market-detection strong { font-size:.86rem; }
+.market-detection small { color:var(--muted); line-height:1.4; }
+.market-detection button { min-height:36px; padding:0 11px; border:1px solid var(--line); border-radius:10px; background:white; color:var(--brown); font-weight:900; cursor:pointer; }
+.manual-divider { margin:4px 0 13px; display:flex; align-items:center; gap:10px; color:var(--muted); font-size:.7rem; font-weight:900; letter-spacing:.06em; text-transform:uppercase; }
+.manual-divider::before,.manual-divider::after { content:''; height:1px; flex:1; background:var(--line); }
+.market-back { margin-top:14px; }
 .guest-form { display:grid; grid-template-columns:1fr 1fr; gap:13px; }
 .guest-form label:not(.consent-box) { display:grid; gap:7px; color:var(--heading); font-size:.86rem; font-weight:900; }
 .guest-form select { width:100%; min-height:52px; padding:0 12px; border:1.5px solid var(--line); border-radius:13px; background:white; color:var(--ink); }

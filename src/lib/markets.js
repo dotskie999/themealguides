@@ -21,6 +21,34 @@ export const MARKETS = {
 export const MARKET_OPTIONS = Object.values(MARKETS);
 export const getMarket = (code) => MARKETS[code] || MARKETS[DEFAULT_MARKET];
 export const normalizeMarketCode = (code) => MARKETS[code] ? code : DEFAULT_MARKET;
+
+const inside = (latitude, longitude, bounds) => latitude >= bounds.south && latitude <= bounds.north && longitude >= bounds.west && longitude <= bounds.east;
+
+export function detectMarketFromCoordinates(latitudeValue, longitudeValue) {
+  const latitude = Number(latitudeValue);
+  const longitude = Number(longitudeValue);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return { supported:false, countryCode:null, marketCode:null };
+
+  const philippines = inside(latitude, longitude, { south:4.2, north:21.4, west:116, east:127.5 });
+  if (philippines) {
+    const metroManila = inside(latitude, longitude, { south:14.3, north:14.95, west:120.75, east:121.35 });
+    return { supported:metroManila, countryCode:'PH', marketCode:metroManila?'ph-ncr':null };
+  }
+
+  const ghana = inside(latitude, longitude, { south:4.5, north:11.3, west:-3.5, east:1.5 });
+  if (ghana) {
+    const launchArea = inside(latitude, longitude, { south:5.35, north:6.05, west:-0.7, east:0.45 });
+    if (!launchArea) return { supported:false, countryCode:'GH', marketCode:null };
+    const accra = { latitude:5.6037, longitude:-0.1870 };
+    const tema = { latitude:5.6698, longitude:0.0166 };
+    const accraDistance = Math.hypot(latitude-accra.latitude,(longitude-accra.longitude)*Math.cos(latitude*Math.PI/180));
+    const temaDistance = Math.hypot(latitude-tema.latitude,(longitude-tema.longitude)*Math.cos(latitude*Math.PI/180));
+    return { supported:true, countryCode:'GH', marketCode:temaDistance<accraDistance?'gh-tema':'gh-accra' };
+  }
+
+  return { supported:false, countryCode:null, marketCode:null };
+}
+
 export const marketMoney = (value, code = DEFAULT_MARKET) => {
   const market = getMarket(code);
   return new Intl.NumberFormat(market.locale, { style:'currency', currency:market.currency }).format(Number(value || 0));

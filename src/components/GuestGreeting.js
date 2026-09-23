@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Loader2, MapPin, Save, UserRound, X } from 'lucide-react';
+import { Loader2, LockKeyhole, MapPin, Save, UserRound, X } from 'lucide-react';
 import { useGuest } from '@/context/GuestContext';
 import { getMarket, MARKET_OPTIONS, normalizeMarketCode } from '@/lib/markets';
 
@@ -43,6 +43,7 @@ export default function GuestGreeting() {
   if (!guest) return null;
   const firstName = guest.customer_name?.trim().split(/\s+/)[0] || 'there';
   const market = getMarket(form?.market_code || guest.market_code);
+  const gpsMarketLocked = guest.market_selection_source === 'gps';
   const update = (event) => setForm((current) => ({ ...current, [event.target.name]: event.target.value }));
 
   const chooseCity = async (event) => {
@@ -64,6 +65,10 @@ export default function GuestGreeting() {
     setForm((current)=>({...current,market_code:marketCode,country_code:nextMarket.countryCode,contact_number:nextMarket.phonePrefix,city:'',city_code:'',barangay:'',digital_address:'',latitude:null,longitude:null,location_source:null}));
     setCities([]); setBarangays([]); setLoadingLocations(true); setError('');
     try{const response=await fetch(`/api/locations?market=${encodeURIComponent(marketCode)}`);const rows=await response.json();if(!response.ok||!Array.isArray(rows))throw new Error(rows.error||'Could not load delivery locations.');setCities(rows);}catch(err){setError(err.message);}finally{setLoadingLocations(false);}
+  };
+  const chooseCountry = (event) => {
+    const firstMarket=MARKET_OPTIONS.find((option)=>option.countryCode===event.target.value);
+    if(firstMarket) chooseMarket({ target:{ value:firstMarket.code } });
   };
 
   const save = async (event) => {
@@ -103,7 +108,9 @@ export default function GuestGreeting() {
       <section className="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title">
         <header><div><p className="kicker">Your saved details</p><h2 id="profile-title">Update your guide card</h2></div><button onClick={() => setOpen(false)} aria-label="Close"><X/></button></header>
         <form onSubmit={save} className="profile-form">
-          <label className="full"><span>Ordering market</span><select name="market_code" value={form.market_code} onChange={chooseMarket}>{MARKET_OPTIONS.map((option)=><option value={option.code} key={option.code}>{option.label}</option>)}</select></label>
+          <label className={gpsMarketLocked?'locked-market':''}><span>Country {gpsMarketLocked&&<small><LockKeyhole size={12}/> GPS</small>}</span><select value={market.countryCode} onChange={chooseCountry} disabled={gpsMarketLocked}><option value="PH">Philippines</option><option value="GH">Ghana</option></select></label>
+          <label className={gpsMarketLocked?'locked-market':''}><span>Region {gpsMarketLocked&&<small><LockKeyhole size={12}/> GPS</small>}</span><select name="market_code" value={form.market_code} onChange={chooseMarket} disabled={gpsMarketLocked}>{MARKET_OPTIONS.filter((option)=>option.countryCode===market.countryCode).map((option)=><option value={option.code} key={option.code}>{option.region}</option>)}</select></label>
+          {gpsMarketLocked&&<p className="profile-market-lock-note full"><LockKeyhole size={16}/> Country and region were detected by GPS and are locked. Your delivery address can still be updated.</p>}
           <label className="full"><span>Customer name</span><input name="customer_name" value={form.customer_name||''} onChange={update} required /></label>
           <label className="full"><span>Email</span><input type="email" name="customer_email" value={form.customer_email||''} onChange={update} required /></label>
           <label className="full"><span>Contact number</span><input name="contact_number" value={form.contact_number||''} onChange={update} inputMode="tel" required /></label>
