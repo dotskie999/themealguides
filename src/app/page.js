@@ -20,7 +20,6 @@ export default async function Home() {
         <div className="welcome-banner"><Image src="/banner-logo.png" alt="The Meal Guides" width={1920} height={800} sizes="(max-width: 699px) calc(100vw - 32px), 1120px" priority /></div>
         <div className="hero-copy">
           <p className="eyebrow"><Sparkles size={16} /> Your Trusted Flavor Navigators!</p>
-          <h1>Welcome to<br /><span>The Meal Guides</span></h1>
           <p className="hero-question">The world is full of incredible flavors, so sit back, relax, and let your trusted flavor navigators map them straight to your doorstep.</p>
         </div>
         <div className="service-strip"><span><Clock3 size={17} /> Made fresh</span><span><MapPin size={17} /> Deliver straight to you</span></div>

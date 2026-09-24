@@ -305,6 +305,7 @@ export async function getGuests() {
   const { data, error } = await supabaseAdmin
     .from('guests')
     .select('*')
+    .order('visit_count', { ascending: false, nullsFirst: false })
     .order('last_visited_at', { ascending: false });
   if (error?.code === 'PGRST205' || error?.code === '42P01') return [];
   if (error) throw databaseError(error, 'load guest information');
