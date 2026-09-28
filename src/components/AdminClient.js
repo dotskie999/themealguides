@@ -1,7 +1,7 @@
 'use client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
-import { CalendarDays, Check, ChefHat, ChevronDown, CircleDollarSign, ClipboardList, Download, Eye, Filter, KeyRound, Layers3, Loader2, LockKeyhole, LogOut, Mail, MapPin, Phone, Plus, RefreshCw, Save, Settings2, ShieldAlert, Store, Trash2, Truck, UserRound, Users, Utensils, X } from 'lucide-react';
+import { Bell, BellRing, CalendarDays, Check, ChefHat, ChevronDown, CircleDollarSign, ClipboardList, Download, Eye, Filter, KeyRound, Layers3, Loader2, LockKeyhole, LogOut, Mail, MapPin, Phone, Plus, RefreshCw, Save, Settings2, ShieldAlert, Store, Trash2, Truck, UserRound, Users, Utensils, X } from 'lucide-react';
 import { normalizeImageUrl } from '@/lib/images';
 import { MARKET_OPTIONS } from '@/lib/markets';
 import AdminPasswordChange from '@/components/AdminPasswordChange';
@@ -30,6 +30,17 @@ async function request(action, body) {
 
 const roleLabel = { inventory:'Inventory', admin:'Admin', super_admin:'Super Admin' };
 
+function playOrderChime(context) {
+  if(!context||context.state!=='running') return;
+  const started=context.currentTime;
+  [[0,784],[.16,1047],[.32,1319]].forEach(([delay,frequency])=>{
+    const oscillator=context.createOscillator(); const gain=context.createGain();
+    oscillator.type='sine'; oscillator.frequency.setValueAtTime(frequency,started+delay);
+    gain.gain.setValueAtTime(.0001,started+delay); gain.gain.exponentialRampToValueAtTime(.2,started+delay+.02); gain.gain.exponentialRampToValueAtTime(.0001,started+delay+.28);
+    oscillator.connect(gain); gain.connect(context.destination); oscillator.start(started+delay); oscillator.stop(started+delay+.3);
+  });
+}
+
 export default function AdminClient({session}) {
   const isSuperAdmin=session.role==='super_admin';
   const cacheKey=`${CACHE_KEY}-${session.role}`;
@@ -51,9 +62,49 @@ export default function AdminClient({session}) {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const [passwordOpen,setPasswordOpen]=useState(false);
+  const [alertsEnabled,setAlertsEnabled]=useState(false);
+  const [newOrderAlert,setNewOrderAlert]=useState(null);
+  const knownOrders=useRef(new Set());
+  const orderBaselineReady=useRef(false);
+  const audioContext=useRef(null);
 
   const load = useCallback(async () => { setLoading(true); setError(''); try { const snapshot=await request('getAdminSnapshot'); setOrders(Array.isArray(snapshot.orders)?snapshot.orders:[]); setData({ ...emptyData, ...snapshot }); localStorage.setItem(cacheKey,JSON.stringify(snapshot)); } catch(e) { setError(e.message); } finally { setLoading(false); } }, [cacheKey]);
   useEffect(() => { localStorage.removeItem(CACHE_KEY); try { const cached=JSON.parse(localStorage.getItem(cacheKey)||'null'); if(cached){setOrders(cached.orders||[]);setData({...emptyData,...cached});setLoading(false);} } catch {} load(); }, [cacheKey,load]);
+  useEffect(()=>{
+    if(session.role==='inventory'||loading||orderBaselineReady.current) return;
+    knownOrders.current=new Set(orders.map(order=>String(order.order_number)));
+    orderBaselineReady.current=true;
+  },[loading,orders,session.role]);
+  useEffect(()=>{
+    if(session.role==='inventory') return;
+    let disposed=false;
+    const checkForOrders=async()=>{
+      try{
+        const latest=await request('getOrders');
+        if(disposed||!Array.isArray(latest)) return;
+        if(!orderBaselineReady.current){knownOrders.current=new Set(latest.map(order=>String(order.order_number)));orderBaselineReady.current=true;setOrders(latest);return;}
+        const incoming=latest.filter(order=>!knownOrders.current.has(String(order.order_number)));
+        latest.forEach(order=>knownOrders.current.add(String(order.order_number)));
+        setOrders(latest);
+        if(!incoming.length) return;
+        const newest=incoming.slice().sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0))[0];
+        setNewOrderAlert({...newest,count:incoming.length});
+        if(alertsEnabled&&typeof Notification!=='undefined'&&Notification.permission==='granted') new Notification(incoming.length===1?`New order #${newest.order_number}`:`${incoming.length} new orders`,{body:`${newest.customer_name||'A customer'} placed an order.`,tag:`meal-guides-order-${newest.order_number}`});
+      }catch{}
+    };
+    const timer=window.setInterval(checkForOrders,8000);
+    return()=>{disposed=true;window.clearInterval(timer);};
+  },[alertsEnabled,session.role]);
+  useEffect(()=>{
+    if(!alertsEnabled||!newOrderAlert) return;
+    playOrderChime(audioContext.current);
+    const timer=window.setInterval(()=>playOrderChime(audioContext.current),4000);
+    return()=>window.clearInterval(timer);
+  },[alertsEnabled,newOrderAlert]);
+  useEffect(()=>{
+    if(newOrderAlert&&String(expandedOrder)===String(newOrderAlert.order_number)) setNewOrderAlert(null);
+  },[expandedOrder,newOrderAlert]);
+  useEffect(()=>()=>{audioContext.current?.close?.();},[]);
   const reportOrders = useMemo(() => orders.filter(order => dateKey(order.created_at) === reportDate), [orders,reportDate]);
   const sortedGuests=useMemo(()=>data.guests.slice().sort((a,b)=>{
     if(guestSort==='top') return Number(b.visit_count||0)-Number(a.visit_count||0) || new Date(b.last_visited_at||0)-new Date(a.last_visited_at||0);
@@ -90,6 +141,16 @@ export default function AdminClient({session}) {
   const stats = useMemo(() => ({ active:reportOrders.filter(o=>!['completed','cancelled'].includes(String(o.status).toLowerCase())).length, sales:reportOrders.filter(o=>String(o.status).toLowerCase()!=='cancelled').reduce((s,o)=>s+Number(o.order_total??o.subtotal??0),0), completed:reportOrders.filter(o=>String(o.status).toLowerCase()==='completed').length }), [reportOrders]);
   const downloadReport = () => { const rows=[['Order','Time','Customer','Contact','City','Barangay','Address','Landmark','Items','Add-ons','Item remarks','Order remarks','Fulfillment','Delivery provider','Status','Subtotal','Delivery fee','Total'],...reportOrders.map(o=>[o.order_number,o.created_at,o.customer_name,o.contact_number,o.city,o.barangay,o.house_number,o.landmark||'',(o.items||[]).map(i=>`${i.quantity}x ${i.name}`).join('; '),(o.items||[]).flatMap(i=>(i.selected_options||[]).map(x=>`${i.name}: ${x.option_name} (+${x.price||0})`)).join('; '),(o.items||[]).filter(i=>i.remarks).map(i=>`${i.name}: ${i.remarks}`).join('; '),o.order_remarks||'',o.fulfillment_type||'doorstep',o.delivery_provider||'',o.status,o.subtotal,o.delivery_fee||0,o.order_total??o.subtotal])]; const csv=rows.map(row=>row.map(cell=>`"${String(cell??'').replace(/"/g,'""')}"`).join(',')).join('\r\n'); const url=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); const a=document.createElement('a');a.href=url;a.download=`meal-guides-orders-${reportDate}.csv`;a.click();URL.revokeObjectURL(url); };
   const updateStatus = async (order_number, new_status) => { const current=orders.find(o=>String(o.order_number)===String(order_number)); if(String(current?.status).toLowerCase()==='completed') return; const previous=orders; setOrders(rows=>rows.map(o=>String(o.order_number)===String(order_number)?{...o,status:new_status}:o)); try { await request('updateOrderStatus',{order_number,new_status}); } catch(e){setOrders(previous);setError(e.message);} };
+  const enableOrderAlerts=async()=>{
+    try{
+      const AudioContextClass=window.AudioContext||window.webkitAudioContext;
+      if(!AudioContextClass) throw new Error('Audio alerts are not supported by this browser.');
+      audioContext.current ||= new AudioContextClass();
+      await audioContext.current.resume(); setAlertsEnabled(true); playOrderChime(audioContext.current);
+      if(typeof Notification!=='undefined'&&Notification.permission==='default') Notification.requestPermission().catch(()=>{});
+    }catch(reason){setError(reason.message||'Could not enable notification sounds.');}
+  };
+  const openNewOrder=()=>{if(!newOrderAlert)return;setTab('orders');setReportDate(dateKey(newOrderAlert.created_at)||todayKey());setExpandedOrder(newOrderAlert.order_number);setNewOrderAlert(null);};
   const save = async () => { setSaving(true); setError(''); try { const map={restaurant:'saveRestaurant',category:'saveCategory',menu:'saveMenuItem',group:'saveOptionGroup',option:'saveOption',account:'saveAdminAccount',delivery:'saveDeliverySettings'}; await request(map[editor.type],{record:editor.record}); setEditor(null); await load(); } catch(e){setError(e.message);} finally{setSaving(false);} };
   const edit = (type, record={}) => {
     const chosenMenuCategory=menuCategory!=='all'?data.categories.find(category=>String(category.category_id)===menuCategory):null;
@@ -118,8 +179,9 @@ export default function AdminClient({session}) {
     : [['orders',ClipboardList,'Orders'],['guests',UserRound,'Guests'],['restaurants',Store,'Restaurants'],['menu',Utensils,'Menu & pricing'],['addons',Layers3,'Add-ons & extras'],...(isSuperAdmin?[['delivery',Truck,'Delivery settings'],['accounts',Users,'Team accounts']]:[])];
 
     return <main className="admin-page"><aside className="admin-sidebar"><div className="admin-brand"><Image src="/the-meal-guides-logo.png" alt="" width={62} height={45}/><div><strong>meal guides</strong><small>{roleLabel[session.role]}</small></div></div><nav>{navigation.map(([id,Icon,label])=><button className={tab===id?'active':''} onClick={()=>setTab(id)} key={id}><Icon size={20}/><span>{label}</span></button>)}</nav><div className="admin-sidebar-actions"><div className={`admin-identity ${session.emergency?'emergency':''}`}>{session.emergency?<ShieldAlert size={17}/>:<UserRound size={17}/>}<span><strong>{session.displayName}</strong><small>{session.emergency?'Temporary full access':roleLabel[session.role]}</small></span></div>{!session.emergency&&<button onClick={()=>setPasswordOpen(true)} className="admin-password-button"><KeyRound size={18}/> Change password</button>}<a href="/" className="admin-store-link"><ChefHat size={18}/> View storefront</a><button onClick={logout} className="admin-logout"><LogOut size={18}/> Sign out</button></div></aside>
-    <section className="admin-workspace">{session.emergency&&<div className="emergency-session-banner"><ShieldAlert/> Emergency Super Admin session · All actions are logged</div>}<header className="admin-topbar"><div><p className="kicker">Control center · {roleLabel[session.role]}</p><h1>{tab==='orders'?'Live orders':tab==='guests'?'Guest information':tab==='restaurants'?'Restaurants':tab==='menu'?'Menu & pricing':tab==='accounts'?'Team accounts':tab==='delivery'?'Delivery settings':'Add-ons & extras'}</h1></div><div className="admin-topbar-actions">{!session.emergency&&<button className="admin-refresh admin-password-mobile" onClick={()=>setPasswordOpen(true)}><KeyRound/><span>Password</span></button>}<button className="admin-refresh" onClick={load} disabled={loading}>{loading?<Loader2 className="spin"/>:<RefreshCw/>}<span>Refresh</span></button></div></header>
+    <section className="admin-workspace">{session.emergency&&<div className="emergency-session-banner"><ShieldAlert/> Emergency Super Admin session · All actions are logged</div>}<header className="admin-topbar"><div><p className="kicker">Control center · {roleLabel[session.role]}</p><h1>{tab==='orders'?'Live orders':tab==='guests'?'Guest information':tab==='restaurants'?'Restaurants':tab==='menu'?'Menu & pricing':tab==='accounts'?'Team accounts':tab==='delivery'?'Delivery settings':'Add-ons & extras'}</h1></div><div className="admin-topbar-actions">{session.role!=='inventory'&&<button className={`admin-refresh order-alert-toggle ${alertsEnabled?'active':''}`} onClick={enableOrderAlerts} title={alertsEnabled?'Play test sound':'Enable new-order sound'}>{alertsEnabled?<BellRing/>:<Bell/>}<span>{alertsEnabled?'Alerts on':'Enable alerts'}</span></button>}{!session.emergency&&<button className="admin-refresh admin-password-mobile" onClick={()=>setPasswordOpen(true)}><KeyRound/><span>Password</span></button>}<button className="admin-refresh" onClick={load} disabled={loading}>{loading?<Loader2 className="spin"/>:<RefreshCw/>}<span>Refresh</span></button></div></header>
       {error&&<div className="admin-alert"><span>{error}</span><button onClick={()=>setError('')}><X size={18}/></button></div>}
+      {newOrderAlert&&<div className="new-order-alert" role="alert"><BellRing/><button onClick={openNewOrder}><strong>{newOrderAlert.count===1?`New order #${newOrderAlert.order_number}`:`${newOrderAlert.count} new orders received`}</strong><small>{newOrderAlert.customer_name||'Customer'} · Sound repeats until you open the order</small></button></div>}
       {tab==='orders'&&<>
         <div className="report-toolbar"><label><CalendarDays/><span>Report date</span><input type="date" value={reportDate} onChange={e=>setReportDate(e.target.value)}/></label><button onClick={downloadReport} disabled={!reportOrders.length}><Download/> Download daily report</button></div>
         <div className="admin-stats"><article><ClipboardList/><span>Active on selected day</span><strong>{stats.active}</strong></article><article><CircleDollarSign/><span>Total ordered on selected day</span><strong>{money(stats.sales)}</strong></article><article><Check/><span>Completed on selected day</span><strong>{stats.completed}</strong></article></div>
