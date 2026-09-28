@@ -2,17 +2,16 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Loader2, LockKeyhole, MapPin, Save, UserRound, X } from 'lucide-react';
+import { CheckCircle2, Loader2, LockKeyhole, MapPin, MapPinned, Save, UserRound, X } from 'lucide-react';
 import { useGuest } from '@/context/GuestContext';
 import { getMarket, MARKET_OPTIONS, normalizeMarketCode } from '@/lib/markets';
+import LocationPinModal, { preloadLocationMap } from '@/components/LocationPinModal';
 
 export default function GuestGreeting() {
   const { guest, updateGuest } = useGuest();
   const [open, setOpen] = useState(false);
+  const [mapOpen,setMapOpen]=useState(false);
   const [form, setForm] = useState(null);
-  const [cities, setCities] = useState([]);
-  const [barangays, setBarangays] = useState([]);
-  const [loadingLocations, setLoadingLocations] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -20,25 +19,20 @@ export default function GuestGreeting() {
     if (!open || !guest) return;
     const marketCode=normalizeMarketCode(guest.market_code);
     const market=getMarket(marketCode);
-    setForm({ ...guest, market_code:marketCode, country_code:market.countryCode, contact_number:guest.contact_number || market.phonePrefix });
+    setForm({
+      ...guest,
+      market_code:marketCode,
+      country_code:market.countryCode,
+      contact_number:guest.contact_number || market.phonePrefix,
+      formatted_address:guest.formatted_address || [guest.house_number,guest.barangay,guest.city].filter(Boolean).join(', '),
+    });
     setError('');
-    setLoadingLocations(true);
-    fetch(`/api/locations?market=${encodeURIComponent(marketCode)}`)
-      .then((response) => response.json())
-      .then(async (rows) => {
-        if (!Array.isArray(rows)) throw new Error('Could not load delivery locations.');
-        setCities(rows);
-        const cityCode = guest.city_code || rows.find((city) => city.name === guest.city)?.code || '';
-        setForm((current) => ({ ...current, city_code: cityCode }));
-        if (cityCode) {
-          const barangayResponse = await fetch(`/api/locations?market=${encodeURIComponent(marketCode)}&city=${encodeURIComponent(cityCode)}`);
-          const barangayRows = await barangayResponse.json();
-          if (Array.isArray(barangayRows)) setBarangays(barangayRows);
-        }
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoadingLocations(false));
   }, [open, guest]);
+
+  useEffect(()=>{
+    const timer=window.setTimeout(()=>preloadLocationMap().catch(()=>{}),350);
+    return()=>window.clearTimeout(timer);
+  },[]);
 
   if (!guest) return null;
   const firstName = guest.customer_name?.trim().split(/\s+/)[0] || 'there';
@@ -46,54 +40,59 @@ export default function GuestGreeting() {
   const gpsMarketLocked = guest.market_selection_source === 'gps';
   const update = (event) => setForm((current) => ({ ...current, [event.target.name]: event.target.value }));
 
-  const chooseCity = async (event) => {
-    const cityCode = event.target.value;
-    const city = cities.find((entry) => entry.code === cityCode)?.name || '';
-    setForm((current) => ({ ...current, city_code: cityCode, city, barangay: '', latitude:null, longitude:null, location_source:null }));
-    setBarangays([]); setLoadingLocations(true); setError('');
-    try {
-      const response = await fetch(`/api/locations?market=${encodeURIComponent(form.market_code)}&city=${encodeURIComponent(cityCode)}`);
-      const rows = await response.json();
-      if (!response.ok || !Array.isArray(rows)) throw new Error(rows.error || 'Could not load barangays.');
-      setBarangays(rows);
-    } catch (err) { setError(err.message); }
-    finally { setLoadingLocations(false); }
+  const chooseMarket = (event) => {
+    const marketCode=event.target.value;
+    const nextMarket=getMarket(marketCode);
+    setForm((current)=>({
+      ...current,
+      market_code:marketCode,
+      country_code:nextMarket.countryCode,
+      contact_number:nextMarket.phonePrefix,
+      city:'',city_code:'',barangay:'',house_number:'',formatted_address:'',digital_address:'',
+      latitude:null,longitude:null,location_accuracy:null,location_source:null,location_precision:null,
+    }));
+    setError('');
   };
 
-  const chooseMarket = async (event) => {
-    const marketCode=event.target.value; const nextMarket=getMarket(marketCode);
-    setForm((current)=>({...current,market_code:marketCode,country_code:nextMarket.countryCode,contact_number:nextMarket.phonePrefix,city:'',city_code:'',barangay:'',digital_address:'',latitude:null,longitude:null,location_source:null}));
-    setCities([]); setBarangays([]); setLoadingLocations(true); setError('');
-    try{const response=await fetch(`/api/locations?market=${encodeURIComponent(marketCode)}`);const rows=await response.json();if(!response.ok||!Array.isArray(rows))throw new Error(rows.error||'Could not load delivery locations.');setCities(rows);}catch(err){setError(err.message);}finally{setLoadingLocations(false);}
-  };
   const chooseCountry = (event) => {
     const firstMarket=MARKET_OPTIONS.find((option)=>option.countryCode===event.target.value);
-    if(firstMarket) chooseMarket({ target:{ value:firstMarket.code } });
+    if(firstMarket) chooseMarket({target:{value:firstMarket.code}});
+  };
+
+  const applyPinnedLocation=(location)=>{
+    if(!location) throw new Error('Select a location on the map first.');
+    const city=location.city||form.city;
+    const barangay=location.barangay||form.barangay||city;
+    const houseNumber=location.house_number||location.formatted;
+    if(!city||!barangay||!houseNumber) throw new Error('Choose a more specific street address before confirming.');
+    setForm((current)=>({
+      ...current,
+      city,
+      city_code:'',
+      barangay,
+      house_number:houseNumber,
+      formatted_address:location.formatted||[houseNumber,barangay,city].filter(Boolean).join(', '),
+      latitude:location.latitude,
+      longitude:location.longitude,
+      location_accuracy:null,
+      location_source:'map_pin',
+      location_precision:'pin',
+    }));
+    setError('');
+    setMapOpen(false);
   };
 
   const save = async (event) => {
     event.preventDefault(); setError('');
     const phone=String(form.contact_number||'').replace(/\s/g,'');
     const valid=form.market_code.startsWith('gh-')?/^\+233\d{9}$/.test(phone):/^\+63\d{10}$/.test(phone);
-    if (!valid) {
-      setError(`Use a valid ${market.country} number beginning with ${market.phonePrefix}.`); return;
+    if (!valid) { setError(`Use a valid ${market.country} number beginning with ${market.phonePrefix}.`); return; }
+    if(!form.formatted_address||!Number.isFinite(Number(form.latitude))||!Number.isFinite(Number(form.longitude))){
+      setError('Choose and confirm your delivery address on the map.'); return;
     }
     setSaving(true);
     try {
-      let next = { ...form, contact_number: phone };
-      const locationResponse = await fetch('/api/geocode', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ city:next.city, barangay:next.barangay, market_code:next.market_code }),
-      });
-      const locationResult = await locationResponse.json();
-      if (locationResponse.ok && locationResult.location) next = {
-        ...next,
-        latitude: locationResult.location.latitude,
-        longitude: locationResult.location.longitude,
-        location_accuracy: null,
-        location_source: 'address',
-      };
-      await updateGuest(next);
+      await updateGuest({ ...form, contact_number:phone });
       setOpen(false);
     } catch (err) { setError(err.message); }
     finally { setSaving(false); }
@@ -114,16 +113,16 @@ export default function GuestGreeting() {
           <label className="full"><span>Customer name</span><input name="customer_name" value={form.customer_name||''} onChange={update} required /></label>
           <label className="full"><span>Email</span><input type="email" name="customer_email" value={form.customer_email||''} onChange={update} required /></label>
           <label className="full"><span>Contact number</span><input name="contact_number" value={form.contact_number||''} onChange={update} inputMode="tel" required /></label>
-          <label><span>{market.cityLabel}</span><select name="city_code" value={form.city_code||''} onChange={chooseCity} disabled={loadingLocations&&!cities.length} required><option value="">Select location</option>{cities.map((city)=><option value={city.code} key={city.code}>{city.name}</option>)}</select></label>
-          <label><span>{market.areaLabel}</span><select name="barangay" value={form.barangay||''} onChange={(event)=>setForm((current)=>({...current,barangay:event.target.value,latitude:null,longitude:null,location_source:null}))} disabled={!form.city_code||loadingLocations} required><option value="">Select area</option>{barangays.map((barangay)=><option value={barangay.name} key={barangay.code}>{barangay.name}</option>)}</select></label>
-          <label className="full"><span>House number / Street</span><input name="house_number" value={form.house_number||''} onChange={update} required /></label>
-          <label className="full"><span>Landmark / address hint <small>Optional</small></span><input name="landmark" value={form.landmark||''} onChange={update} placeholder="Near the barangay hall, blue gate" /></label>
+          <button type="button" className="map-pin-button full" onClick={()=>setMapOpen(true)}><MapPinned/><span><strong>{form.formatted_address?'Edit delivery location':'Choose delivery location'}</strong><small>Search your complete address or move the map pin</small></span>{form.location_source==='map_pin'&&<i><CheckCircle2/> Confirmed</i>}</button>
+          <div className="locked-address full"><MapPin/><span><small>Confirmed delivery address</small><strong>{form.formatted_address||'No location confirmed yet'}</strong></span><LockKeyhole aria-label="Locked"/></div>
+          <label className="full"><span>Landmark / address hint <small>Optional</small></span><input name="landmark" value={form.landmark||''} onChange={update} placeholder="Nearby landmark, gate color, or building" /></label>
           {market.digitalAddress&&<label className="full"><span>GhanaPost GPS digital address <small>Optional</small></span><input name="digital_address" value={form.digital_address||''} onChange={update} placeholder="Example: GA-123-4567" /></label>}
-          <p className="profile-privacy full"><UserRound size={17}/> Changes are saved to this browser and your secure guest profile. Distance uses only the selected city and barangay.</p>
+          <p className="profile-privacy full"><UserRound size={17}/> Changes are saved to this browser and your secure guest profile. Delivery distance uses the confirmed map pin.</p>
           {error&&<p className="form-error full">{error}</p>}
           <footer className="full"><button type="button" className="secondary-button" onClick={()=>setOpen(false)}>Cancel</button><button className="primary-button" disabled={saving}>{saving?<Loader2 className="spin"/>:<Save/>}{saving?'Saving…':'Save details'}</button></footer>
         </form>
       </section>
     </div>, document.body)}
+    {mapOpen&&form&&createPortal(<LocationPinModal marketCode={form.market_code} latitude={form.latitude} longitude={form.longitude} address={form.formatted_address||[form.house_number,form.barangay,form.city].filter(Boolean).join(', ')} initialLocation={{city:form.city,barangay:form.barangay,house_number:form.house_number}} onClose={()=>setMapOpen(false)} onConfirm={applyPinnedLocation}/>,document.body)}
   </>;
 }

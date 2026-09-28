@@ -8,15 +8,22 @@ const marketCenter={
   'gh-tema':[5.6698,0.0166,12],
 };
 
-export default function LocationPinModal({marketCode,latitude,longitude,address='',onClose,onConfirm}) {
+let leafletPromise;
+export function preloadLocationMap(){
+  leafletPromise ||= import('leaflet').then((module)=>module.default);
+  return leafletPromise;
+}
+
+export default function LocationPinModal({marketCode,latitude,longitude,address='',initialLocation=null,onClose,onConfirm}) {
   const mapElement=useRef(null); const mapInstance=useRef(null); const markerInstance=useRef(null);
+  const suggestionCache=useRef(new Map());
   const [query,setQuery]=useState(address); const [selection,setSelection]=useState(null); const [suggestions,setSuggestions]=useState([]);
   const [loading,setLoading]=useState(false); const [suggestionsLoading,setSuggestionsLoading]=useState(false); const [saving,setSaving]=useState(false); const [dirty,setDirty]=useState(false); const [error,setError]=useState('');
 
   useEffect(()=>{
     let disposed=false;
     async function initialize(){
-      const L=(await import('leaflet')).default;
+      const L=await preloadLocationMap();
       if(disposed||!mapElement.current||mapInstance.current) return;
       const fallback=marketCenter[marketCode]||marketCenter['ph-ncr'];
       const hasPoint=latitude!==null&&latitude!==undefined&&longitude!==null&&longitude!==undefined&&Number.isFinite(Number(latitude))&&Number.isFinite(Number(longitude));
@@ -35,25 +42,43 @@ export default function LocationPinModal({marketCode,latitude,longitude,address=
         } catch(reason){if(!disposed){setSelection(null);setError(reason.message);}} finally{if(!disposed)setLoading(false);}
       }
       map.on('click',event=>choosePoint(event.latlng)); marker.on('dragend',()=>choosePoint(marker.getLatLng()));
-      if(hasPoint) choosePoint({lat:center[0],lng:center[1]});
+      if(hasPoint){
+        if(address){
+          setSelection({
+            latitude:center[0],longitude:center[1],formatted:address,
+            city:initialLocation?.city||'',barangay:initialLocation?.barangay||'',
+            house_number:initialLocation?.house_number||address,source:'saved_pin',
+          });
+        } else choosePoint({lat:center[0],lng:center[1]});
+      }
       setTimeout(()=>{if(!disposed)map.invalidateSize();},0);
     }
     initialize();
     return()=>{disposed=true;if(mapInstance.current){mapInstance.current.remove();mapInstance.current=null;markerInstance.current=null;}};
-  },[marketCode,latitude,longitude]);
+  },[marketCode,latitude,longitude,address,initialLocation?.city,initialLocation?.barangay,initialLocation?.house_number]);
 
   useEffect(()=>{
-    if(query.trim().length<3||!dirty){setSuggestions([]);return;}
+    const searchText=query.trim();
+    if(searchText.length<3||!dirty){setSuggestions([]);setSuggestionsLoading(false);return;}
+    const fallback=marketCenter[marketCode]||marketCenter['ph-ncr'];
+    const mapCenterPoint=mapInstance.current?.getCenter();
+    const biasLatitude=mapCenterPoint?.lat??(Number.isFinite(Number(latitude))?Number(latitude):fallback[0]);
+    const biasLongitude=mapCenterPoint?.lng??(Number.isFinite(Number(longitude))?Number(longitude):fallback[1]);
+    const cacheKey=`${marketCode}|${biasLatitude.toFixed(3)},${biasLongitude.toFixed(3)}|${searchText.toLowerCase()}`;
+    const cached=suggestionCache.current.get(cacheKey);
+    if(cached){setSuggestions(cached);setSuggestionsLoading(false);return;}
     const controller=new AbortController();
     const timer=setTimeout(async()=>{
       setSuggestionsLoading(true);
       try{
-        const params=new URLSearchParams({q:query,market:marketCode});
-        if(latitude!==null&&longitude!==null&&Number.isFinite(Number(latitude))&&Number.isFinite(Number(longitude))){params.set('lat',String(latitude));params.set('lon',String(longitude));}
+        const params=new URLSearchParams({q:searchText,market:marketCode,lat:String(biasLatitude),lon:String(biasLongitude)});
         const response=await fetch(`/api/address-suggestions?${params}`,{signal:controller.signal}); const result=await response.json();
-        setSuggestions(response.ok&&Array.isArray(result)?result:[]);
+        const rows=response.ok&&Array.isArray(result)?result:[];
+        suggestionCache.current.set(cacheKey,rows);
+        if(suggestionCache.current.size>60) suggestionCache.current.delete(suggestionCache.current.keys().next().value);
+        setSuggestions(rows);
       } catch(reason){if(reason.name!=='AbortError')setSuggestions([]);} finally{if(!controller.signal.aborted)setSuggestionsLoading(false);}
-    },450);
+    },200);
     return()=>{clearTimeout(timer);controller.abort();};
   },[query,dirty,marketCode,latitude,longitude]);
 
@@ -68,7 +93,9 @@ export default function LocationPinModal({marketCode,latitude,longitude,address=
     if(suggestions[0]){chooseSuggestion(suggestions[0]);return;}
     setLoading(true);
     try{
-      const response=await fetch(`/api/address-suggestions?${new URLSearchParams({q:query,market:marketCode})}`);const result=await response.json();
+      const fallback=marketCenter[marketCode]||marketCenter['ph-ncr'];const center=mapInstance.current?.getCenter();
+      const params=new URLSearchParams({q:query.trim(),market:marketCode,lat:String(center?.lat??fallback[0]),lon:String(center?.lng??fallback[1])});
+      const response=await fetch(`/api/address-suggestions?${params}`);const result=await response.json();
       if(!response.ok||!Array.isArray(result)||!result[0]) throw new Error(result.error||'No matching address was found.');
       chooseSuggestion(result[0]);
     }catch(reason){setError(reason.message);}finally{setLoading(false);}

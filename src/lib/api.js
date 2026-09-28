@@ -2,10 +2,10 @@ import 'server-only';
 
 import crypto from 'crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { distanceKm } from '@/lib/distance';
 import { getMarket, normalizeMarketCode } from '@/lib/markets';
 import { calculateDeliveryQuote, DEFAULT_DELIVERY_SETTINGS, normalizeDeliverySettings } from '@/lib/delivery';
 import { geocodeDeliveryArea } from '@/lib/geocode';
+import { geoapifyDrivingRoute } from '@/lib/geoapify';
 
 const ORDER_STATUSES = ['pending', 'confirmed', 'preparing', 'ready', 'completed', 'cancelled'];
 
@@ -75,15 +75,15 @@ export async function getDeliveryQuote(payload = {}) {
   const marketCode=normalizeMarketCode(payload.market_code);
   const latitude=payload.latitude===null||payload.latitude===undefined?null:Number(payload.latitude);
   const longitude=payload.longitude===null||payload.longitude===undefined?null:Number(payload.longitude);
-  let deliveryDistance=null;
-  if(fulfillmentType==='doorstep'&&marketCode==='ph-ncr'&&payload.location_source!=='map_pin'){
+  let route=null;
+  if(fulfillmentType==='doorstep'&&marketCode==='ph-ncr'){
     if(!payload.restaurant_id) throw new Error('A restaurant is required for a delivery quote.');
     const {data:restaurant,error}=await supabaseAdmin.from('restaurants').select('latitude,longitude').eq('restaurant_id',payload.restaurant_id).single();
     if(error) throw databaseError(error,'load restaurant location');
-    deliveryDistance=distanceKm(latitude,longitude,restaurant.latitude,restaurant.longitude);
+    route=await geoapifyDrivingRoute({fromLatitude:restaurant.latitude,fromLongitude:restaurant.longitude,toLatitude:latitude,toLongitude:longitude});
   }
   const settings=await getDeliverySettings();
-  return {...calculateDeliveryQuote({marketCode,fulfillmentType,distanceKm:deliveryDistance,settings}),settings};
+  return {...calculateDeliveryQuote({marketCode,fulfillmentType,distanceKm:route?.distance_km??null,settings}),...route,settings};
 }
 
 export async function getMenu(restaurantId) {
@@ -242,10 +242,13 @@ export async function submitOrder(payload = {}) {
   let deliveryLatitude = payload.latitude === null || payload.latitude === undefined ? null : Number(payload.latitude);
   let deliveryLongitude = payload.longitude === null || payload.longitude === undefined ? null : Number(payload.longitude);
   if(fulfillmentType==='doorstep'&&marketCode==='ph-ncr'){
-    const geocoded=await geocodeDeliveryArea(payload.city,payload.barangay,marketCode,payload.house_number,payload.landmark);
-    if(!geocoded) throw new Error('We could not locate this delivery address. Please review it or select pickup.');
-    deliveryLatitude=Number(geocoded.latitude);
-    deliveryLongitude=Number(geocoded.longitude);
+    const hasConfirmedPin=payload.location_source==='map_pin'&&Number.isFinite(deliveryLatitude)&&Number.isFinite(deliveryLongitude);
+    if(!hasConfirmedPin){
+      const geocoded=await geocodeDeliveryArea(payload.city,payload.barangay,marketCode,payload.house_number,payload.landmark);
+      if(!geocoded) throw new Error('We could not locate this delivery address. Please review it or select pickup.');
+      deliveryLatitude=Number(geocoded.latitude);
+      deliveryLongitude=Number(geocoded.longitude);
+    }
   }
   const { data: restaurantLocation, error: locationError } = await supabaseAdmin
     .from('restaurants')
@@ -253,9 +256,12 @@ export async function submitOrder(payload = {}) {
     .eq('restaurant_id', restaurantId)
     .single();
   if (locationError) throw databaseError(locationError, 'load restaurant location');
-  const deliveryDistance = distanceKm(deliveryLatitude, deliveryLongitude, restaurantLocation.latitude, restaurantLocation.longitude);
+  const route=fulfillmentType==='doorstep'&&marketCode==='ph-ncr'
+    ? await geoapifyDrivingRoute({fromLatitude:restaurantLocation.latitude,fromLongitude:restaurantLocation.longitude,toLatitude:deliveryLatitude,toLongitude:deliveryLongitude})
+    : null;
+  const deliveryDistance=route?.distance_km??null;
   const deliverySettings=await getDeliverySettings();
-  const deliveryQuote=calculateDeliveryQuote({marketCode,fulfillmentType,distanceKm:deliveryDistance,settings:deliverySettings});
+  const deliveryQuote={...calculateDeliveryQuote({marketCode,fulfillmentType,distanceKm:deliveryDistance,settings:deliverySettings}),...route};
   if(fulfillmentType==='doorstep'&&marketCode==='ph-ncr'&&deliveryQuote.delivery_fee===null) throw new Error('We could not calculate the delivery distance. Please review the address or select pickup.');
   const deliveryFee=Number(deliveryQuote.delivery_fee||0);
   const orderTotal=Number((subtotal+deliveryFee).toFixed(2));
