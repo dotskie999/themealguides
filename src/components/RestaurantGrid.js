@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { ArrowUpRight, ChefHat, MapPin } from 'lucide-react';
@@ -9,10 +9,13 @@ import { distanceKm, formatDistance, formatTravelEstimate } from '@/lib/distance
 import { normalizeImageUrl } from '@/lib/images';
 import { restaurantCity, restaurantSlug } from '@/lib/restaurant';
 import { DEFAULT_MARKET, getMarket, normalizeMarketCode } from '@/lib/markets';
+import { restaurantAvailability } from '@/lib/restaurantHours';
 
 export default function RestaurantGrid({ restaurants }) {
   const { guest } = useGuest();
   const [expandedDescriptions,setExpandedDescriptions]=useState({});
+  const [now,setNow]=useState(()=>new Date());
+  useEffect(()=>{const timer=window.setInterval(()=>setNow(new Date()),30000);return()=>window.clearInterval(timer);},[]);
   const marketCode=normalizeMarketCode(guest?.market_code||DEFAULT_MARKET);
   const rows = useMemo(() => restaurants.filter((restaurant)=>normalizeMarketCode(restaurant.market_code)===marketCode).map((restaurant) => ({
     ...restaurant,
@@ -37,9 +40,10 @@ export default function RestaurantGrid({ restaurants }) {
     const isLong=description.length>105;
     const expanded=Boolean(expandedDescriptions[restaurant.restaurant_id]);
     const restaurantUrl=`/restaurant/${restaurantSlug(restaurant.name)}`;
+    const availability=restaurantAvailability(restaurant,now);
     return <article className="restaurant-card" key={restaurant.restaurant_id}>
       <Link className="restaurant-card-cover" href={restaurantUrl} aria-label={`View ${restaurant.name} menu`}><div className="restaurant-art">{normalizeImageUrl(restaurant.logo_url) ? <Image src={normalizeImageUrl(restaurant.logo_url)} alt={`${restaurant.name} logo`} fill sizes="(max-width: 699px) calc(100vw - 32px), (max-width: 1023px) calc(50vw - 44px), 380px" priority={index < 2} unoptimized referrerPolicy="no-referrer" /> : <ChefHat size={40} />}<span className="card-number">{String(index + 1).padStart(2, '0')}</span>{restaurant.distance !== null&&<span className={`distance-badge ${outside?'outside':''}`}><MapPin size={14}/><span><strong>{formatDistance(restaurant.distance)}</strong><small>{formatTravelEstimate(restaurant.distance)} · from your delivery area</small>{outside&&<em>Outside delivery area</em>}</span></span>}</div></Link>
-      <div className="restaurant-info"><div><Link className="restaurant-name-link" href={restaurantUrl}><h3>{restaurant.name}</h3></Link><div className="restaurant-description-shell"><p className={expanded?'expanded':''}>{description}</p>{isLong?<button type="button" onClick={()=>setExpandedDescriptions(current=>({...current,[restaurant.restaurant_id]:!current[restaurant.restaurant_id]}))}>{expanded?'See less':'See more'}</button>:<span aria-hidden="true"/>}</div>{city&&<small className="restaurant-address">{city}</small>}</div><Link className="round-arrow" href={restaurantUrl} aria-label={`View ${restaurant.name} menu`}><ArrowUpRight size={21} /></Link></div>
+      <div className="restaurant-info"><div><span className={`restaurant-hours-badge ${availability.isOpen?'open':'closed'}`}>{availability.label}</span><Link className="restaurant-name-link" href={restaurantUrl}><h3>{restaurant.name}</h3></Link><div className="restaurant-description-shell"><p className={expanded?'expanded':''}>{description}</p>{isLong?<button type="button" onClick={()=>setExpandedDescriptions(current=>({...current,[restaurant.restaurant_id]:!current[restaurant.restaurant_id]}))}>{expanded?'See less':'See more'}</button>:<span aria-hidden="true"/>}</div><small className="restaurant-hours-detail">{availability.detail}</small>{city&&<small className="restaurant-address">{city}</small>}</div><Link className="round-arrow" href={restaurantUrl} aria-label={`View ${restaurant.name} menu`}><ArrowUpRight size={21} /></Link></div>
     </article>;
   })}</div>;
 }

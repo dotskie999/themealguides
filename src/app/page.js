@@ -25,7 +25,7 @@ export default async function Home() {
         <div className="service-strip"><span><Clock3 size={17} /> Made fresh</span><span><MapPin size={17} /> Deliver straight to you</span></div>
       </header>
       <section className="content-panel">
-        <div className="section-heading"><div><p className="kicker">Choose your kitchen</p><h2>Good food, one tap away.</h2></div><span className="live-badge"><i /> Open now</span></div>
+        <div className="section-heading"><div><p className="kicker">Choose your kitchen</p><h2>Good food, one tap away.</h2></div><span className="live-badge"><i /> Live kitchen status</span></div>
         {error ? <div className="state-card"><ChefHat size={34} /><h3>Our menus are taking a quick breather.</h3><p>Please refresh in a moment.</p></div> : restaurants.length === 0 ? <div className="state-card"><ChefHat size={34} /><h3>No kitchens are serving yet.</h3><p>Check back soon for today&apos;s line-up.</p></div> : (
           <RestaurantGrid restaurants={restaurants} />
         )}

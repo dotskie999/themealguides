@@ -6,6 +6,7 @@ import { getMarket, normalizeMarketCode } from '@/lib/markets';
 import { calculateDeliveryQuote, DEFAULT_DELIVERY_SETTINGS, normalizeDeliverySettings } from '@/lib/delivery';
 import { geocodeDeliveryArea } from '@/lib/geocode';
 import { geoapifyDrivingRoute } from '@/lib/geoapify';
+import { marketTimezone, normalizeWeeklyHours, restaurantAvailability } from '@/lib/restaurantHours';
 
 const ORDER_STATUSES = ['pending', 'confirmed', 'preparing', 'ready', 'completed', 'cancelled'];
 
@@ -252,10 +253,12 @@ export async function submitOrder(payload = {}) {
   }
   const { data: restaurantLocation, error: locationError } = await supabaseAdmin
     .from('restaurants')
-    .select('latitude,longitude')
+    .select('*')
     .eq('restaurant_id', restaurantId)
     .single();
   if (locationError) throw databaseError(locationError, 'load restaurant location');
+  const availability=restaurantAvailability(restaurantLocation);
+  if(!availability.isOpen) throw new Error(`${restaurantLocation.name||'This restaurant'} is currently closed. ${availability.detail}`);
   const route=fulfillmentType==='doorstep'&&marketCode==='ph-ncr'
     ? await geoapifyDrivingRoute({fromLatitude:restaurantLocation.latitude,fromLongitude:restaurantLocation.longitude,toLatitude:deliveryLatitude,toLongitude:deliveryLongitude})
     : null;
@@ -399,7 +402,15 @@ async function upsert(table, keyField, record, idPrefix) {
   return data;
 }
 
-export const saveRestaurant = (record) => upsert('restaurants', 'restaurant_id', record, 'r');
+export async function saveRestaurant(record={}) {
+  const cleaned={...record};
+  cleaned.timezone=cleaned.timezone||marketTimezone(cleaned.market_code);
+  if(cleaned.weekly_hours) cleaned.weekly_hours=normalizeWeeklyHours(cleaned.weekly_hours);
+  const result=await supabaseAdmin.from('restaurants').upsert(cleanRecord({...cleaned,restaurant_id:cleaned.restaurant_id||newId('r')}),{onConflict:'restaurant_id'}).select().single();
+  if(result.error&&['PGRST204','42703'].includes(result.error.code)) throw new Error('Restaurant hours are not installed yet. Run RESTAURANT_HOURS_MIGRATION.sql in Supabase, then try again.');
+  if(result.error) throw databaseError(result.error,'save restaurants');
+  return result.data;
+}
 export const saveCategory = (record) => upsert('categories', 'category_id', record, 'cat');
 
 export async function saveMenuItem(record = {}) {
