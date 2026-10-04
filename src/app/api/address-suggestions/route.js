@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { geoapifyAutocomplete, geoapifyConfigured } from '@/lib/geoapify';
-import { normalizeMarketCode } from '@/lib/markets';
+import { assertServerMarket, serverDefaultMarket } from '@/lib/deploymentServer';
 
 export const runtime='edge';
 export const dynamic='force-dynamic';
@@ -16,7 +16,7 @@ export async function GET(request) {
     if(text.length>180) return NextResponse.json({error:'Address search is too long.'},{status:400});
     const latitudeValue=searchParams.get('lat'); const longitudeValue=searchParams.get('lon');
     const latitude=latitudeValue===null?null:Number(latitudeValue); const longitude=longitudeValue===null?null:Number(longitudeValue);
-    const marketCode=normalizeMarketCode(searchParams.get('market'));
+    const marketCode=assertServerMarket(searchParams.get('market')||serverDefaultMarket());
     const bias=latitude!==null&&longitude!==null&&Number.isFinite(latitude)&&Number.isFinite(longitude)?`proximity:${longitude},${latitude}`:undefined;
     const cacheKey=`${marketCode}|${bias||''}|${text.toLowerCase()}`;
     const cached=suggestionCache.get(cacheKey);

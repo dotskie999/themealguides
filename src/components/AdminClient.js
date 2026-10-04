@@ -6,8 +6,9 @@ import { normalizeImageUrl } from '@/lib/images';
 import { MARKET_OPTIONS, marketMoney } from '@/lib/markets';
 import AdminPasswordChange from '@/components/AdminPasswordChange';
 import { DEFAULT_WEEKLY_HOURS, marketTimezone, normalizeWeeklyHours, RESTAURANT_DAYS, restaurantAvailability } from '@/lib/restaurantHours';
+import { DEFAULT_DEPLOYMENT_MARKET, DEPLOYMENT_COUNTRY, DEPLOYMENT_COUNTRY_NAME, DEPLOYMENT_TIMEZONE } from '@/lib/deployment';
 
-const money = (v) => `₱${Number(v || 0).toFixed(2)}`;
+const money = (v) => marketMoney(v,DEFAULT_DEPLOYMENT_MARKET);
 const emptyData = { restaurants: [], categories: [], menuItems: [], optionGroups: [], options: [], guests: [], adminAccounts: [], deliverySettings:null };
 const statuses = ['pending', 'confirmed', 'preparing', 'ready', 'completed', 'cancelled'];
 const CACHE_KEY = 'tmg-admin-snapshot-v1';
@@ -15,7 +16,7 @@ const dateKey = (value) => {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
-  return new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Manila', year:'numeric', month:'2-digit', day:'2-digit' }).format(date);
+  return new Intl.DateTimeFormat('en-CA', { timeZone:DEPLOYMENT_TIMEZONE, year:'numeric', month:'2-digit', day:'2-digit' }).format(date);
 };
 const todayKey = () => dateKey(new Date());
 async function request(action, body) {
@@ -44,7 +45,7 @@ function playOrderChime(context) {
 
 export default function AdminClient({session}) {
   const isSuperAdmin=session.role==='super_admin';
-  const cacheKey=`${CACHE_KEY}-${session.role}`;
+  const cacheKey=`${CACHE_KEY}-${DEPLOYMENT_COUNTRY.toLowerCase()}-${session.role}`;
   const [tab, setTab] = useState(session.role==='inventory'?'restaurants':'orders');
   const [orders, setOrders] = useState([]);
   const [data, setData] = useState(emptyData);
@@ -114,9 +115,9 @@ export default function AdminClient({session}) {
   }),[data.guests,guestSort]);
   const filteredRestaurants = useMemo(() => {
     const marketOrder = new Map(MARKET_OPTIONS.map((market,index) => [market.code,index]));
-    const restaurants = restaurantMarket === 'all' ? data.restaurants : data.restaurants.filter(restaurant => String(restaurant.market_code || 'ph-ncr') === restaurantMarket);
+    const restaurants = restaurantMarket === 'all' ? data.restaurants : data.restaurants.filter(restaurant => String(restaurant.market_code || DEFAULT_DEPLOYMENT_MARKET) === restaurantMarket);
     return restaurants.slice().sort((a,b) => {
-      const marketDifference = (marketOrder.get(a.market_code || 'ph-ncr') ?? Number.MAX_SAFE_INTEGER) - (marketOrder.get(b.market_code || 'ph-ncr') ?? Number.MAX_SAFE_INTEGER);
+      const marketDifference = (marketOrder.get(a.market_code || DEFAULT_DEPLOYMENT_MARKET) ?? Number.MAX_SAFE_INTEGER) - (marketOrder.get(b.market_code || DEFAULT_DEPLOYMENT_MARKET) ?? Number.MAX_SAFE_INTEGER);
       const aPosition = Number(a.sort_order) > 0 ? Number(a.sort_order) : Number.MAX_SAFE_INTEGER;
       const bPosition = Number(b.sort_order) > 0 ? Number(b.sort_order) : Number.MAX_SAFE_INTEGER;
       return marketDifference || aPosition - bPosition || String(a.name || '').localeCompare(String(b.name || ''));
@@ -139,7 +140,7 @@ export default function AdminClient({session}) {
     return String(targetItem?.category_id) === addonCategory;
   }), [data.optionGroups,data.menuItems,addonCategory]);
   const filteredOptions = useMemo(() => { if(addonCategory==='all') return data.options; const groupIds=new Set(filteredGroups.map(group=>String(group.group_id))); return data.options.filter(option=>groupIds.has(String(option.group_id))); }, [data.options,filteredGroups,addonCategory]);
-  const restaurantMoney=(value,restaurantId)=>marketMoney(value,data.restaurants.find(restaurant=>String(restaurant.restaurant_id)===String(restaurantId))?.market_code||'ph-ncr');
+  const restaurantMoney=(value,restaurantId)=>marketMoney(value,data.restaurants.find(restaurant=>String(restaurant.restaurant_id)===String(restaurantId))?.market_code||DEFAULT_DEPLOYMENT_MARKET);
   const optionRestaurantId=(option)=>{
     const group=data.optionGroups.find(entry=>String(entry.group_id)===String(option.group_id));
     const item=group?.item_id?data.menuItems.find(entry=>String(entry.item_id)===String(group.item_id)):null;
@@ -167,7 +168,7 @@ export default function AdminClient({session}) {
     const selectedCategory=addonCategory!=='all'?addonCategory:data.categories[0]?.category_id||'';
     const selectedGroup=filteredGroups[0]?.group_id||data.optionGroups[0]?.group_id||'';
     const targetItem=data.menuItems.find(item=>String(item.item_id)===String(record.item_id));
-    const defaultMarket=restaurantMarket!=='all'?restaurantMarket:'ph-ncr';
+    const defaultMarket=restaurantMarket!=='all'?restaurantMarket:DEFAULT_DEPLOYMENT_MARKET;
     const defaults={restaurant:{restaurant_id:'',market_code:defaultMarket,name:'',address:'',latitude:'',longitude:'',delivery_radius_km:10,sort_order:1,logo_url:'',banner_url:'',description:'',active:'yes',timezone:marketTimezone(defaultMarket),weekly_hours:DEFAULT_WEEKLY_HOURS,orders_paused:false,pause_message:''},category:{category_id:'',restaurant_id:restaurantId,name:'',active:'yes',sort_order:1},menu:{item_id:'',restaurant_id:restaurantId,category_id:firstCategory?.category_id||'',name:'',description:'',base_price:'',photo_url:'',active:'yes',sort_order:1},group:{group_id:'',scope:'category',scope_category_id:selectedCategory,category_id:selectedCategory,item_id:'',group_name:'',selection_type:'multiple',required:'no',sort_order:1},option:{option_id:'',group_id:selectedGroup,option_name:'',price:0,sort_order:1},account:{user_id:'',display_name:'',username:'',password:'',role:'inventory',active:true},delivery:{market_code:'ph-ncr',base_distance_km:2.2,base_fare:38,additional_per_km:6,max_internal_distance_km:7.2,peak_surcharge:25,lunch_peak_start:'11:00',lunch_peak_end:'13:30',dinner_peak_start:'17:00',dinner_peak_end:'20:30',storm_surcharge:30,storm_active:false,active:true}};
     const nextRecord={...defaults[type],...record};
     if(type==='restaurant') nextRecord.weekly_hours=normalizeWeeklyHours(record.weekly_hours||DEFAULT_WEEKLY_HOURS);
@@ -186,10 +187,10 @@ export default function AdminClient({session}) {
   };
   const navigation=session.role==='inventory'
     ? [['restaurants',Store,'Restaurants'],['menu',Utensils,'Menu & pricing'],['addons',Layers3,'Add-ons & extras']]
-    : [['orders',ClipboardList,'Orders'],['guests',UserRound,'Guests'],['restaurants',Store,'Restaurants'],['menu',Utensils,'Menu & pricing'],['addons',Layers3,'Add-ons & extras'],...(isSuperAdmin?[['delivery',Truck,'Delivery settings'],['accounts',Users,'Team accounts']]:[])];
+    : [['orders',ClipboardList,'Orders'],['guests',UserRound,'Guests'],['restaurants',Store,'Restaurants'],['menu',Utensils,'Menu & pricing'],['addons',Layers3,'Add-ons & extras'],...(isSuperAdmin?[...(DEPLOYMENT_COUNTRY==='PH'?[['delivery',Truck,'Delivery settings']]:[]),['accounts',Users,'Team accounts']]:[])];
 
     return <main className="admin-page"><aside className="admin-sidebar"><div className="admin-brand"><Image src="/the-meal-guides-logo.png" alt="" width={62} height={45}/><div><strong>meal guides</strong><small>{roleLabel[session.role]}</small></div></div><nav>{navigation.map(([id,Icon,label])=><button className={tab===id?'active':''} onClick={()=>setTab(id)} key={id}><Icon size={20}/><span>{label}</span></button>)}</nav><div className="admin-sidebar-actions"><div className={`admin-identity ${session.emergency?'emergency':''}`}>{session.emergency?<ShieldAlert size={17}/>:<UserRound size={17}/>}<span><strong>{session.displayName}</strong><small>{session.emergency?'Temporary full access':roleLabel[session.role]}</small></span></div>{!session.emergency&&<button onClick={()=>setPasswordOpen(true)} className="admin-password-button"><KeyRound size={18}/> Change password</button>}<a href="/" className="admin-store-link"><ChefHat size={18}/> View storefront</a><button onClick={logout} className="admin-logout"><LogOut size={18}/> Sign out</button></div></aside>
-    <section className="admin-workspace">{session.emergency&&<div className="emergency-session-banner"><ShieldAlert/> Emergency Super Admin session · All actions are logged</div>}<header className="admin-topbar"><div><p className="kicker">Control center · {roleLabel[session.role]}</p><h1>{tab==='orders'?'Live orders':tab==='guests'?'Guest information':tab==='restaurants'?'Restaurants':tab==='menu'?'Menu & pricing':tab==='accounts'?'Team accounts':tab==='delivery'?'Delivery settings':'Add-ons & extras'}</h1></div><div className="admin-topbar-actions">{session.role!=='inventory'&&<button className={`admin-refresh order-alert-toggle ${alertsEnabled?'active':''}`} onClick={enableOrderAlerts} title={alertsEnabled?'Play test sound':'Enable new-order sound'}>{alertsEnabled?<BellRing/>:<Bell/>}<span>{alertsEnabled?'Alerts on':'Enable alerts'}</span></button>}{!session.emergency&&<button className="admin-refresh admin-password-mobile" onClick={()=>setPasswordOpen(true)}><KeyRound/><span>Password</span></button>}<button className="admin-refresh" onClick={load} disabled={loading}>{loading?<Loader2 className="spin"/>:<RefreshCw/>}<span>Refresh</span></button></div></header>
+    <section className="admin-workspace">{session.emergency&&<div className="emergency-session-banner"><ShieldAlert/> {DEPLOYMENT_COUNTRY_NAME} emergency Super Admin session · All actions are logged</div>}<header className="admin-topbar"><div><p className="kicker">{DEPLOYMENT_COUNTRY_NAME} control center · {roleLabel[session.role]}</p><h1>{tab==='orders'?'Live orders':tab==='guests'?'Guest information':tab==='restaurants'?'Restaurants':tab==='menu'?'Menu & pricing':tab==='accounts'?'Team accounts':tab==='delivery'?'Delivery settings':'Add-ons & extras'}</h1></div><div className="admin-topbar-actions">{session.role!=='inventory'&&<button className={`admin-refresh order-alert-toggle ${alertsEnabled?'active':''}`} onClick={enableOrderAlerts} title={alertsEnabled?'Play test sound':'Enable new-order sound'}>{alertsEnabled?<BellRing/>:<Bell/>}<span>{alertsEnabled?'Alerts on':'Enable alerts'}</span></button>}{!session.emergency&&<button className="admin-refresh admin-password-mobile" onClick={()=>setPasswordOpen(true)}><KeyRound/><span>Password</span></button>}<button className="admin-refresh" onClick={load} disabled={loading}>{loading?<Loader2 className="spin"/>:<RefreshCw/>}<span>Refresh</span></button></div></header>
       {error&&<div className="admin-alert"><span>{error}</span><button onClick={()=>setError('')}><X size={18}/></button></div>}
       {newOrderAlert&&<div className="new-order-alert" role="alert"><BellRing/><button onClick={openNewOrder}><strong>{newOrderAlert.count===1?`New order #${newOrderAlert.order_number}`:`${newOrderAlert.count} new orders received`}</strong><small>{newOrderAlert.customer_name||'Customer'} · Sound repeats until you open the order</small></button></div>}
       {tab==='orders'&&<>
@@ -209,7 +210,7 @@ export default function AdminClient({session}) {
         </div>
         <AdminCollection title="Restaurant brands" count={filteredRestaurants.length} emptyLabel="restaurants in this market" description="Set a storefront position to control which restaurant appears first in each market." action="Add restaurant" onAdd={()=>edit('restaurant')} loading={loading}>
           {filteredRestaurants.map(r=>{
-            const market=MARKET_OPTIONS.find(option=>option.code===(r.market_code||'ph-ncr'));
+            const market=MARKET_OPTIONS.find(option=>option.code===(r.market_code||DEFAULT_DEPLOYMENT_MARKET));
             const availability=restaurantAvailability(r);
             return <article className="entity-card" key={r.restaurant_id}><div className="entity-image">{normalizeImageUrl(r.logo_url)?<Image src={normalizeImageUrl(r.logo_url)} alt="" fill sizes="76px" unoptimized referrerPolicy="no-referrer"/>:<Store/>}</div><div><span className={`entity-status ${availability.isOpen?'on':'closed'}`}>{availability.label}</span><h3>{r.name}</h3><p>{r.description}</p><small>{market?.label||r.market_code} · {availability.detail} · {Number(r.sort_order)>0?`Position ${r.sort_order}`:'No position set'}</small></div><button onClick={()=>edit('restaurant',r)}><Settings2/> Edit</button></article>;
           })}
@@ -237,7 +238,7 @@ function Editor({editor,setEditor,data,save,saving}) {
   const selectedGroupItem=selectedGroup?.item_id?data.menuItems.find(item=>String(item.item_id)===String(selectedGroup.item_id)):null;
   const selectedGroupCategory=data.categories.find(category=>String(category.category_id)===String(selectedGroup?.category_id||selectedGroupItem?.category_id));
   const priceRestaurantId=type==='menu'?record.restaurant_id:selectedGroupItem?.restaurant_id||selectedGroupCategory?.restaurant_id;
-  const priceMarketCode=data.restaurants.find(restaurant=>String(restaurant.restaurant_id)===String(priceRestaurantId))?.market_code||'ph-ncr';
+  const priceMarketCode=data.restaurants.find(restaurant=>String(restaurant.restaurant_id)===String(priceRestaurantId))?.market_code||DEFAULT_DEPLOYMENT_MARKET;
   const priceSymbol=priceMarketCode.startsWith('gh-')?'GH₵':'₱';
   const configs = {
     restaurant:[['market_code','Market','market'],['timezone','Local timezone','timezone'],['name','Restaurant name','text'],['address','Restaurant address','text'],['latitude','Latitude','number'],['longitude','Longitude','number'],['delivery_radius_km','Delivery radius (km)','number'],['sort_order','Storefront position (1 comes first)','number'],['logo_url','Logo URL (restaurant cards)','url'],['banner_url','Banner URL (restaurant page cover)','url'],['description','Description','textarea'],['active','Storefront visibility','active'],['orders_paused','Temporarily pause orders','boolean'],['pause_message','Pause message','text']],
@@ -259,7 +260,7 @@ function Editor({editor,setEditor,data,save,saving}) {
     kind==='role'?<select value={record[key]||'inventory'} onChange={e=>set(key,e.target.value)}><option value="inventory">Inventory</option><option value="admin">Admin</option><option value="super_admin">Super Admin</option></select>:
     kind==='accountActive'?<select value={String(record[key]!==false)} onChange={e=>set(key,e.target.value==='true')}><option value="true">Active</option><option value="false">Disabled</option></select>:
     kind==='boolean'?<select value={String(record[key]===true||record[key]==='true')} onChange={e=>set(key,e.target.value==='true')}><option value="true">Enabled</option><option value="false">Disabled</option></select>:
-    kind==='market'?<select value={record[key]||'ph-ncr'} onChange={e=>{const marketCode=e.target.value;setEditor({...editor,record:{...record,[key]:marketCode,...(type==='restaurant'?{timezone:marketTimezone(marketCode)}:{})}});}}>{MARKET_OPTIONS.map(market=><option value={market.code} key={market.code}>{market.label}</option>)}</select>:
+    kind==='market'?<select value={record[key]||DEFAULT_DEPLOYMENT_MARKET} onChange={e=>{const marketCode=e.target.value;setEditor({...editor,record:{...record,[key]:marketCode,...(type==='restaurant'?{timezone:marketTimezone(marketCode)}:{})}});}}>{MARKET_OPTIONS.map(market=><option value={market.code} key={market.code}>{market.label}</option>)}</select>:
     kind==='timezone'?<select value={record[key]||marketTimezone(record.market_code)} onChange={e=>set(key,e.target.value)}><option value="Asia/Manila">Asia/Manila</option><option value="Africa/Accra">Africa/Accra</option></select>:
     kind==='restaurant'?<select value={record[key]} onChange={e=>{const restaurantId=e.target.value;const nextCategory=type==='menu'?data.categories.find(category=>String(category.restaurant_id)===String(restaurantId)&&category.active==='yes')?.category_id||'':record.category_id;setEditor({...editor,record:{...record,restaurant_id:restaurantId,category_id:nextCategory}});}}>{data.restaurants.map(x=><option value={x.restaurant_id} key={x.restaurant_id}>{x.name}</option>)}</select>:
     kind==='category'?<select value={record[key]} onChange={e=>set(key,e.target.value)} required><option value="" disabled>Select a category</option>{categories.map(x=><option value={x.category_id} key={x.category_id}>{x.name}</option>)}</select>:

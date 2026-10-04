@@ -1,6 +1,7 @@
 import crypto from 'crypto';
+import { serverDeploymentCountry } from '@/lib/deploymentServer';
 
-export const ADMIN_COOKIE = 'tmg_admin';
+export const ADMIN_COOKIE = `tmg_admin_${serverDeploymentCountry().toLowerCase()}`;
 const MAX_AGE_SECONDS = 60 * 60 * 12;
 
 function secret() {
@@ -17,6 +18,7 @@ export function createAdminToken(session = {}) {
   const payload = Buffer.from(JSON.stringify({
     type: session.type === 'emergency' ? 'emergency' : 'account',
     userId: session.userId || null,
+    countryScope: session.countryScope || serverDeploymentCountry(),
     expiresAt: Date.now() + MAX_AGE_SECONDS * 1000,
   })).toString('base64url');
   return `${payload}.${sign(payload)}`;
@@ -31,6 +33,7 @@ export function verifyAdminToken(token) {
   try {
     const session = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
     if (!session.expiresAt || Number(session.expiresAt) <= Date.now()) return null;
+    if (session.countryScope !== serverDeploymentCountry()) return null;
     if (session.type === 'account' && !session.userId) return null;
     return session;
   } catch { return null; }

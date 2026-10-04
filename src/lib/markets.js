@@ -1,4 +1,6 @@
-export const DEFAULT_MARKET = 'ph-ncr';
+import { DEFAULT_DEPLOYMENT_MARKET, DEPLOYMENT_COUNTRY, isDeploymentMarket } from '@/lib/deployment';
+
+export const DEFAULT_MARKET = DEFAULT_DEPLOYMENT_MARKET;
 
 export const MARKETS = {
   'ph-ncr': {
@@ -18,9 +20,10 @@ export const MARKETS = {
   },
 };
 
-export const MARKET_OPTIONS = Object.values(MARKETS);
+export const ALL_MARKET_OPTIONS = Object.values(MARKETS);
+export const MARKET_OPTIONS = ALL_MARKET_OPTIONS.filter((market)=>market.countryCode===DEPLOYMENT_COUNTRY);
 export const getMarket = (code) => MARKETS[code] || MARKETS[DEFAULT_MARKET];
-export const normalizeMarketCode = (code) => MARKETS[code] ? code : DEFAULT_MARKET;
+export const normalizeMarketCode = (code) => MARKETS[code] && isDeploymentMarket(code) ? code : DEFAULT_MARKET;
 
 const inside = (latitude, longitude, bounds) => latitude >= bounds.south && latitude <= bounds.north && longitude >= bounds.west && longitude <= bounds.east;
 

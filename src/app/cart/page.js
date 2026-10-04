@@ -8,8 +8,10 @@ import { useGuest } from '@/context/GuestContext';
 import { restaurantSlug } from '@/lib/restaurant';
 import { getMarket, marketMoney, normalizeMarketCode } from '@/lib/markets';
 import LocationPinModal, { preloadLocationMap } from '@/components/LocationPinModal';
+import { DEFAULT_DEPLOYMENT_MARKET, DEPLOYMENT_COUNTRY } from '@/lib/deployment';
 
-const initialForm = { market_code:'ph-ncr', country_code:'PH', fulfillment_type:'doorstep', customer_name:'', customer_email:'', contact_number:'+63', city:'', city_code:'', barangay:'', house_number:'', formatted_address:'', landmark:'', digital_address:'', order_remarks:'', latitude:null, longitude:null, location_accuracy:null, location_source:null, location_precision:null };
+const initialMarket=getMarket(DEFAULT_DEPLOYMENT_MARKET);
+const initialForm = { market_code:DEFAULT_DEPLOYMENT_MARKET, country_code:DEPLOYMENT_COUNTRY, fulfillment_type:'doorstep', customer_name:'', customer_email:'', contact_number:initialMarket.phonePrefix, city:'', city_code:'', barangay:'', house_number:'', formatted_address:'', landmark:'', digital_address:'', order_remarks:'', latitude:null, longitude:null, location_accuracy:null, location_source:null, location_precision:null };
 
 export default function CartPage() {
   const { items, ready, subtotal, removeItem, clearCart, saveOrder } = useCart();
@@ -63,9 +65,9 @@ export default function CartPage() {
       ...current,
       customer_name: guest.customer_name || '',
       market_code: normalizeMarketCode(guest.market_code),
-      country_code: guest.country_code || getMarket(guest.market_code).countryCode,
+      country_code: DEPLOYMENT_COUNTRY,
       customer_email: guest.customer_email || '',
-      contact_number: guest.contact_number || '+63',
+      contact_number: guest.contact_number || initialMarket.phonePrefix,
       city: guest.city || '',
       city_code: guest.city_code || '',
       barangay: guest.barangay || '',

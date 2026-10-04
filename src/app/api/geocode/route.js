@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
 import { geocodeDeliveryArea } from '@/lib/geocode';
+import { assertServerMarket } from '@/lib/deploymentServer';
 
 export async function POST(request) {
   try {
     const { city, barangay, house_number, landmark, market_code } = await request.json();
-    const location = await geocodeDeliveryArea(city, barangay, market_code, house_number, landmark);
+    const location = await geocodeDeliveryArea(city, barangay, assertServerMarket(market_code), house_number, landmark);
     return NextResponse.json({ location });
   } catch (error) {
     return NextResponse.json({ error: error.message || 'Could not estimate this delivery area.' }, { status: 400 });

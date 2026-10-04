@@ -2,11 +2,12 @@ import 'server-only';
 
 import crypto from 'crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { getMarket, normalizeMarketCode } from '@/lib/markets';
+import { getMarket } from '@/lib/markets';
 import { calculateDeliveryQuote, DEFAULT_DELIVERY_SETTINGS, normalizeDeliverySettings } from '@/lib/delivery';
 import { geocodeDeliveryArea } from '@/lib/geocode';
 import { geoapifyDrivingRoute } from '@/lib/geoapify';
 import { marketTimezone, normalizeWeeklyHours, restaurantAvailability } from '@/lib/restaurantHours';
+import { assertServerMarket, serverDefaultMarket, serverDeploymentCountry, serverMarketCodes } from '@/lib/deploymentServer';
 
 const ORDER_STATUSES = ['pending', 'confirmed', 'preparing', 'ready', 'completed', 'cancelled'];
 
@@ -43,17 +44,35 @@ async function selectAll(table) {
   return data || [];
 }
 
+async function scopedRestaurant(restaurantId, activeOnly=false) {
+  let query=supabaseAdmin.from('restaurants').select('*').eq('restaurant_id',restaurantId).in('market_code',serverMarketCodes());
+  if(activeOnly) query=query.eq('active','yes');
+  const {data,error}=await query.maybeSingle();
+  if(error) throw databaseError(error,'load restaurant');
+  if(!data) throw new Error('Restaurant not found in this deployment.');
+  return data;
+}
+
+async function scopedRows(table, column, values) {
+  if(!values.length) return [];
+  const {data,error}=await supabaseAdmin.from(table).select('*').in(column,values);
+  if(error) throw databaseError(error,`read ${table}`);
+  return data||[];
+}
+
 export async function getRestaurants() {
   const { data, error } = await supabaseAdmin
     .from('restaurants')
     .select('*')
     .eq('active', 'yes')
+    .in('market_code',serverMarketCodes())
     .order('name');
   if (error) throw databaseError(error, 'load restaurants');
   return data || [];
 }
 
 export async function getDeliverySettings() {
+  if(serverDeploymentCountry()!=='PH') return normalizeDeliverySettings(DEFAULT_DELIVERY_SETTINGS);
   const {data,error}=await supabaseAdmin.from('delivery_settings').select('*').eq('market_code','ph-ncr').maybeSingle();
   if(error&&['42P01','PGRST205'].includes(error.code)) return DEFAULT_DELIVERY_SETTINGS;
   if(error) throw databaseError(error,'load delivery settings');
@@ -61,6 +80,7 @@ export async function getDeliverySettings() {
 }
 
 export async function saveDeliverySettings(record = {}) {
+  if(serverDeploymentCountry()!=='PH') throw new Error('Delivery fare settings are only available in the Philippines deployment.');
   const settings=normalizeDeliverySettings({...record,market_code:'ph-ncr'});
   for(const key of ['base_distance_km','base_fare','additional_per_km','max_internal_distance_km','peak_surcharge','storm_surcharge']){
     if(!Number.isFinite(Number(settings[key]))||Number(settings[key])<0) throw new Error('Delivery amounts and distances must be valid positive numbers.');
@@ -73,14 +93,14 @@ export async function saveDeliverySettings(record = {}) {
 
 export async function getDeliveryQuote(payload = {}) {
   const fulfillmentType=payload.fulfillment_type==='pickup'?'pickup':'doorstep';
-  const marketCode=normalizeMarketCode(payload.market_code);
+  const marketCode=assertServerMarket(payload.market_code||serverDefaultMarket());
   const latitude=payload.latitude===null||payload.latitude===undefined?null:Number(payload.latitude);
   const longitude=payload.longitude===null||payload.longitude===undefined?null:Number(payload.longitude);
   let route=null;
   if(fulfillmentType==='doorstep'&&marketCode==='ph-ncr'){
     if(!payload.restaurant_id) throw new Error('A restaurant is required for a delivery quote.');
-    const {data:restaurant,error}=await supabaseAdmin.from('restaurants').select('latitude,longitude').eq('restaurant_id',payload.restaurant_id).single();
-    if(error) throw databaseError(error,'load restaurant location');
+    const restaurant=await scopedRestaurant(payload.restaurant_id,true);
+    if(restaurant.market_code!==marketCode) throw new Error('The restaurant and delivery market do not match.');
     route=await geoapifyDrivingRoute({fromLatitude:restaurant.latitude,fromLongitude:restaurant.longitude,toLatitude:latitude,toLongitude:longitude});
   }
   const settings=await getDeliverySettings();
@@ -91,7 +111,7 @@ export async function getMenu(restaurantId) {
   if (!restaurantId) throw new Error('A restaurant is required.');
 
   const [restaurantResult, categoriesResult, itemsResult, groupsResult, optionsResult] = await Promise.all([
-    supabaseAdmin.from('restaurants').select('*').eq('restaurant_id', restaurantId).eq('active', 'yes').maybeSingle(),
+    supabaseAdmin.from('restaurants').select('*').eq('restaurant_id', restaurantId).eq('active', 'yes').in('market_code',serverMarketCodes()).maybeSingle(),
     supabaseAdmin.from('categories').select('*').eq('restaurant_id', restaurantId).eq('active', 'yes').order('sort_order').order('name'),
     supabaseAdmin.from('menu_items').select('*').eq('restaurant_id', restaurantId).eq('active', 'yes'),
     supabaseAdmin.from('option_groups').select('*').order('sort_order'),
@@ -138,7 +158,7 @@ export async function getMenu(restaurantId) {
 }
 
 export async function getOrders(status) {
-  let query = supabaseAdmin.from('orders').select('*').order('timestamp', { ascending: false });
+  let query = supabaseAdmin.from('orders').select('*').in('market_code',serverMarketCodes()).order('timestamp', { ascending: false });
   if (status && status !== 'All') query = query.eq('status', status);
   const { data, error } = await query;
   if (error) throw databaseError(error, 'load orders');
@@ -150,14 +170,21 @@ export async function getOrders(status) {
 }
 
 export async function getAdminData() {
-  const [restaurants, categories, menuItems, optionGroups, options, guests] = await Promise.all([
-    selectAll('restaurants'),
-    selectAll('categories'),
-    selectAll('menu_items'),
+  const {data:restaurants,error:restaurantError}=await supabaseAdmin.from('restaurants').select('*').in('market_code',serverMarketCodes());
+  if(restaurantError) throw databaseError(restaurantError,'load admin restaurants');
+  const restaurantIds=(restaurants||[]).map(row=>row.restaurant_id);
+  const [categories,menuItems,allGroups,allOptions,guests]=await Promise.all([
+    scopedRows('categories','restaurant_id',restaurantIds),
+    scopedRows('menu_items','restaurant_id',restaurantIds),
     selectAll('option_groups'),
     selectAll('options'),
     getGuests(),
   ]);
+  const categoryIds=new Set(categories.map(row=>String(row.category_id)));
+  const itemIds=new Set(menuItems.map(row=>String(row.item_id)));
+  const optionGroups=allGroups.filter(row=>row.item_id?itemIds.has(String(row.item_id)):categoryIds.has(String(row.category_id)));
+  const groupIds=new Set(optionGroups.map(row=>String(row.group_id)));
+  const options=allOptions.filter(row=>groupIds.has(String(row.group_id)));
   return { restaurants, categories, menuItems, optionGroups, options, guests };
 }
 
@@ -231,14 +258,17 @@ export async function submitOrder(payload = {}) {
     throw new Error('The order must contain at least one menu item.');
   }
 
+  const restaurantLocation=await scopedRestaurant(restaurantId,true);
+  const marketCode=assertServerMarket(restaurantLocation.market_code);
+  if(payload.market_code&&String(payload.market_code)!==marketCode) throw new Error('This order belongs to a different deployment market.');
+  const market = getMarket(marketCode);
+
   for (const field of ['customer_name', 'contact_number', 'city', 'barangay', 'house_number']) {
     if (!String(payload[field] || '').trim()) throw new Error('Please complete all required customer details.');
   }
 
   const items = await buildOrderItems(restaurantId, requestedItems);
   const subtotal = items.reduce((sum, item) => sum + item.total_price, 0);
-  const marketCode = normalizeMarketCode(payload.market_code);
-  const market = getMarket(marketCode);
   const fulfillmentType=payload.fulfillment_type==='pickup'?'pickup':'doorstep';
   let deliveryLatitude = payload.latitude === null || payload.latitude === undefined ? null : Number(payload.latitude);
   let deliveryLongitude = payload.longitude === null || payload.longitude === undefined ? null : Number(payload.longitude);
@@ -251,12 +281,6 @@ export async function submitOrder(payload = {}) {
       deliveryLongitude=Number(geocoded.longitude);
     }
   }
-  const { data: restaurantLocation, error: locationError } = await supabaseAdmin
-    .from('restaurants')
-    .select('*')
-    .eq('restaurant_id', restaurantId)
-    .single();
-  if (locationError) throw databaseError(locationError, 'load restaurant location');
   const availability=restaurantAvailability(restaurantLocation);
   if(!availability.isOpen) throw new Error(`${restaurantLocation.name||'This restaurant'} is currently closed. ${availability.detail}`);
   const route=fulfillmentType==='doorstep'&&marketCode==='ph-ncr'
@@ -314,6 +338,7 @@ export async function getGuests() {
   const { data, error } = await supabaseAdmin
     .from('guests')
     .select('*')
+    .in('market_code',serverMarketCodes())
     .order('visit_count', { ascending: false, nullsFirst: false })
     .order('last_visited_at', { ascending: false });
   if (error?.code === 'PGRST205' || error?.code === '42P01') return [];
@@ -331,7 +356,7 @@ export async function saveGuest(payload = {}) {
   const houseNumber = String(payload.house_number || '').trim();
   const landmark = String(payload.landmark || '').trim();
   const digitalAddress = String(payload.digital_address || '').trim();
-  const marketCode = normalizeMarketCode(payload.market_code);
+  const marketCode = assertServerMarket(payload.market_code||serverDefaultMarket());
   const market = getMarket(marketCode);
   const latitude = payload.latitude === null || payload.latitude === undefined ? null : Number(payload.latitude);
   const longitude = payload.longitude === null || payload.longitude === undefined ? null : Number(payload.longitude);
@@ -404,6 +429,12 @@ async function upsert(table, keyField, record, idPrefix) {
 
 export async function saveRestaurant(record={}) {
   const cleaned={...record};
+  if(cleaned.restaurant_id){
+    const {data:existing,error}=await supabaseAdmin.from('restaurants').select('market_code').eq('restaurant_id',cleaned.restaurant_id).maybeSingle();
+    if(error) throw databaseError(error,'find restaurant');
+    if(existing) cleaned.market_code=assertServerMarket(existing.market_code);
+  }
+  cleaned.market_code=assertServerMarket(cleaned.market_code||serverDefaultMarket());
   cleaned.timezone=cleaned.timezone||marketTimezone(cleaned.market_code);
   if(cleaned.weekly_hours) cleaned.weekly_hours=normalizeWeeklyHours(cleaned.weekly_hours);
   const result=await supabaseAdmin.from('restaurants').upsert(cleanRecord({...cleaned,restaurant_id:cleaned.restaurant_id||newId('r')}),{onConflict:'restaurant_id'}).select().single();
@@ -411,10 +442,23 @@ export async function saveRestaurant(record={}) {
   if(result.error) throw databaseError(result.error,'save restaurants');
   return result.data;
 }
-export const saveCategory = (record) => upsert('categories', 'category_id', record, 'cat');
+export async function saveCategory(record={}) {
+  await scopedRestaurant(record.restaurant_id);
+  if(record.category_id){
+    const {data,error}=await supabaseAdmin.from('categories').select('restaurant_id').eq('category_id',record.category_id).maybeSingle();
+    if(error) throw databaseError(error,'find category');
+    if(data) await scopedRestaurant(data.restaurant_id);
+  }
+  return upsert('categories','category_id',record,'cat');
+}
 
 export async function saveMenuItem(record = {}) {
   const cleaned = cleanRecord(record);
+  if(cleaned.item_id){
+    const {data:existing,error:existingError}=await supabaseAdmin.from('menu_items').select('restaurant_id').eq('item_id',cleaned.item_id).maybeSingle();
+    if(existingError) throw databaseError(existingError,'find menu item');
+    if(existing) await scopedRestaurant(existing.restaurant_id);
+  }
   if (cleaned.category_id) {
     const { data, error } = await supabaseAdmin
       .from('categories')
@@ -422,6 +466,7 @@ export async function saveMenuItem(record = {}) {
       .eq('category_id', cleaned.category_id)
       .single();
     if (error) throw databaseError(error, 'find the menu category');
+    await scopedRestaurant(data.restaurant_id);
     cleaned.restaurant_id = data.restaurant_id;
     cleaned.category = data.name;
   }
@@ -430,19 +475,53 @@ export async function saveMenuItem(record = {}) {
 
 export async function saveOptionGroup(record = {}) {
   const cleaned = cleanRecord(record);
+  if(cleaned.group_id){
+    const {data:existing,error:existingError}=await supabaseAdmin.from('option_groups').select('group_id').eq('group_id',cleaned.group_id).maybeSingle();
+    if(existingError) throw databaseError(existingError,'find add-on group');
+    if(existing) await assertScopedGroup(existing.group_id);
+  }
   const scope = cleaned.scope === 'item' ? 'item' : 'category';
   delete cleaned.scope;
   delete cleaned.scope_category_id;
   if (scope === 'item') {
     cleaned.category_id = null;
     if (!cleaned.item_id) throw new Error('Choose the menu item that should receive this add-on group.');
+    const {data:item,error}=await supabaseAdmin.from('menu_items').select('restaurant_id').eq('item_id',cleaned.item_id).single();
+    if(error) throw databaseError(error,'find menu item');
+    await scopedRestaurant(item.restaurant_id);
   } else {
     cleaned.item_id = null;
     if (!cleaned.category_id) throw new Error('Choose the category that should receive this add-on group.');
+    const {data:category,error}=await supabaseAdmin.from('categories').select('restaurant_id').eq('category_id',cleaned.category_id).single();
+    if(error) throw databaseError(error,'find category');
+    await scopedRestaurant(category.restaurant_id);
   }
   return upsert('option_groups', 'group_id', cleaned, 'og');
 }
-export const saveOption = (record) => upsert('options', 'option_id', record, 'opt');
+async function assertScopedGroup(groupId) {
+  const {data:group,error}=await supabaseAdmin.from('option_groups').select('category_id,item_id').eq('group_id',groupId).single();
+  if(error) throw databaseError(error,'find add-on group');
+  if(group.item_id){
+    const {data:item,error:itemError}=await supabaseAdmin.from('menu_items').select('restaurant_id').eq('item_id',group.item_id).single();
+    if(itemError) throw databaseError(itemError,'find menu item');
+    await scopedRestaurant(item.restaurant_id);
+  }else{
+    const {data:category,error:categoryError}=await supabaseAdmin.from('categories').select('restaurant_id').eq('category_id',group.category_id).single();
+    if(categoryError) throw databaseError(categoryError,'find category');
+    await scopedRestaurant(category.restaurant_id);
+  }
+  return group;
+}
+
+export async function saveOption(record={}) {
+  await assertScopedGroup(record.group_id);
+  if(record.option_id){
+    const {data,error}=await supabaseAdmin.from('options').select('group_id').eq('option_id',record.option_id).maybeSingle();
+    if(error) throw databaseError(error,'find option');
+    if(data) await assertScopedGroup(data.group_id);
+  }
+  return upsert('options','option_id',record,'opt');
+}
 
 async function deleteAdminRecord(table, keyField, id, label) {
   const recordId = String(id || '').trim();
@@ -458,8 +537,13 @@ async function deleteAdminRecord(table, keyField, id, label) {
   return { deleted: true, id: recordId };
 }
 
-export const deleteOptionGroup = ({ id } = {}) => deleteAdminRecord('option_groups', 'group_id', id, 'add-on group');
-export const deleteOption = ({ id } = {}) => deleteAdminRecord('options', 'option_id', id, 'choice or extra');
+export async function deleteOptionGroup({id}={}) { await assertScopedGroup(id); return deleteAdminRecord('option_groups','group_id',id,'add-on group'); }
+export async function deleteOption({id}={}) {
+  const {data,error}=await supabaseAdmin.from('options').select('group_id').eq('option_id',id).single();
+  if(error) throw databaseError(error,'find option');
+  await assertScopedGroup(data.group_id);
+  return deleteAdminRecord('options','option_id',id,'choice or extra');
+}
 
 export async function updateOrderStatus(orderNumber, status) {
   if (!ORDER_STATUSES.includes(status)) throw new Error('Invalid order status.');
@@ -468,8 +552,9 @@ export async function updateOrderStatus(orderNumber, status) {
 
   const { data: existing, error: readError } = await supabaseAdmin
     .from('orders')
-    .select('status')
+    .select('status,market_code')
     .eq('order_number', numericOrderNumber)
+    .in('market_code',serverMarketCodes())
     .single();
   if (readError) throw databaseError(readError, 'find the order');
   if (existing.status === 'Completed' && status !== 'Completed') {
@@ -480,6 +565,7 @@ export async function updateOrderStatus(orderNumber, status) {
     .from('orders')
     .update({ status })
     .eq('order_number', numericOrderNumber)
+    .in('market_code',serverMarketCodes())
     .select()
     .single();
   if (error) throw databaseError(error, 'update order status');

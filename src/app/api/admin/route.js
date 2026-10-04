@@ -34,16 +34,16 @@ function forbidden(message='Your account does not have permission for this actio
   return NextResponse.json({error:message},{status:403});
 }
 
-async function listAdminAccounts() {
-  let {data,error}=await supabaseAdmin.from('admin_profiles').select('user_id,username,display_name,role,active,must_change_password,created_at,updated_at').order('display_name');
-  if(error?.code==='42703'||String(error?.message||'').includes('must_change_password')) ({data,error}=await supabaseAdmin.from('admin_profiles').select('user_id,username,display_name,role,active,created_at,updated_at').order('display_name'));
+async function listAdminAccounts(session) {
+  let {data,error}=await supabaseAdmin.from('admin_profiles').select('user_id,username,display_name,role,active,must_change_password,country_scope,created_at,updated_at').eq('country_scope',session.countryScope).order('display_name');
+  if(error?.code==='42703'||String(error?.message||'').includes('must_change_password')) ({data,error}=await supabaseAdmin.from('admin_profiles').select('user_id,username,display_name,role,active,country_scope,created_at,updated_at').eq('country_scope',session.countryScope).order('display_name'));
   if(error&&['42P01','PGRST205'].includes(error.code)) return [];
   if(error) throw new Error(error.message);
   return data||[];
 }
 
-async function listAdminActivity() {
-  const {data,error}=await supabaseAdmin.from('admin_activity_logs').select('*').order('created_at',{ascending:false}).limit(100);
+async function listAdminActivity(session) {
+  const {data,error}=await supabaseAdmin.from('admin_activity_logs').select('*').eq('country_scope',session.countryScope).order('created_at',{ascending:false}).limit(100);
   if(error&&['42P01','PGRST205'].includes(error.code)) return [];
   if(error) throw new Error(error.message);
   return data||[];
@@ -59,9 +59,12 @@ async function saveAdminAccount(record, session) {
     const password=String(record.password||'');
     if(password&&password.length<8) throw new Error('New password must contain at least 8 characters.');
     if(String(record.user_id)===String(session.userId)&&(!active||role!=='super_admin')) throw new Error('You cannot disable or demote your own Super Admin account.');
+    const {data:existing,error:existingError}=await supabaseAdmin.from('admin_profiles').select('country_scope').eq('user_id',record.user_id).eq('country_scope',session.countryScope).maybeSingle();
+    if(existingError) throw new Error(existingError.message);
+    if(!existing) throw new Error('This staff account belongs to another admin deployment.');
     const profileUpdate={display_name:displayName,role,active,updated_at:new Date().toISOString()};
     if(password) profileUpdate.must_change_password=true;
-    const {data,error}=await supabaseAdmin.from('admin_profiles').update(profileUpdate).eq('user_id',record.user_id).select().single();
+    const {data,error}=await supabaseAdmin.from('admin_profiles').update(profileUpdate).eq('user_id',record.user_id).eq('country_scope',session.countryScope).select().single();
     if(error) throw new Error(error.message);
     if(password){const {error:passwordError}=await supabaseAdmin.auth.admin.updateUserById(record.user_id,{password});if(passwordError) throw new Error(passwordError.message);}
     return data;
@@ -71,7 +74,7 @@ async function saveAdminAccount(record, session) {
   const email=adminUsernameEmail(username);
   const {data:created,error:authError}=await supabaseAdmin.auth.admin.createUser({email,password,email_confirm:true,user_metadata:{display_name:displayName,username}});
   if(authError||!created.user) throw new Error(authError?.message||'Could not create the staff login.');
-  const {data,error}=await supabaseAdmin.from('admin_profiles').insert({user_id:created.user.id,email,username,display_name:displayName,role,active:true,must_change_password:true,created_by:session.userId}).select().single();
+  const {data,error}=await supabaseAdmin.from('admin_profiles').insert({user_id:created.user.id,email,username,display_name:displayName,role,active:true,must_change_password:true,country_scope:session.countryScope,created_by:session.userId}).select().single();
   if(error){await supabaseAdmin.auth.admin.deleteUser(created.user.id);throw new Error(error.message);}
   return data;
 }
@@ -84,15 +87,15 @@ export async function GET(request) {
   if(!READ_ROLES[action]) return NextResponse.json({error:'Unsupported admin read action.'},{status:400});
   if(!READ_ROLES[action].includes(session.role)) return forbidden();
   try {
-    if(action==='getAdminAccounts') return NextResponse.json(await listAdminAccounts());
-    if(action==='getAdminActivity') return NextResponse.json(await listAdminActivity());
+    if(action==='getAdminAccounts') return NextResponse.json(await listAdminAccounts(session));
+    if(action==='getAdminActivity') return NextResponse.json(await listAdminActivity(session));
     const params=Object.fromEntries(searchParams.entries()); delete params.action;
     const result=await apiRequest(action,{params});
     if(session.role==='inventory'){
       if(action==='getAdminSnapshot') return NextResponse.json({...result,orders:[],guests:[]});
       if(action==='getAdminData') return NextResponse.json({...result,guests:[]});
     }
-    if(action==='getAdminSnapshot'&&session.role==='super_admin') return NextResponse.json({...result,adminAccounts:await listAdminAccounts(),deliverySettings:await apiRequest('getDeliverySettings')});
+    if(action==='getAdminSnapshot'&&session.role==='super_admin') return NextResponse.json({...result,adminAccounts:await listAdminAccounts(session),deliverySettings:session.countryScope==='PH'?await apiRequest('getDeliverySettings'):null});
     return NextResponse.json(result);
   } catch(error){return NextResponse.json({error:error.message},{status:500});}
 }

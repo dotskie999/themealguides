@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { GHANA_LOCATIONS } from '@/lib/markets';
+import { assertServerMarket, serverDefaultMarket } from '@/lib/deploymentServer';
 
 const BASE = 'https://psgc.cloud/api/v2';
 const NCR_CODE = '1300000000';
@@ -7,7 +8,7 @@ const NCR_CODE = '1300000000';
 export async function GET(request) {
   try {
     const cityCode = new URL(request.url).searchParams.get('city');
-    const market = new URL(request.url).searchParams.get('market') || 'ph-ncr';
+    const market = assertServerMarket(new URL(request.url).searchParams.get('market') || serverDefaultMarket());
     if (GHANA_LOCATIONS[market]) {
       const municipalities = GHANA_LOCATIONS[market];
       const municipality = municipalities.find(([code]) => code === cityCode);
@@ -26,6 +27,7 @@ export async function GET(request) {
     const locations = cityCode ? rows : rows.filter(row => ['City','Mun'].includes(row.type));
     return NextResponse.json(locations.map(row => ({ code: row.code, name: row.name })).sort((a,b) => a.name.localeCompare(b.name)));
   } catch (error) {
-    return NextResponse.json({ error: error.message }, { status: 502 });
+    const status=String(error.message||'').includes('deployment cannot access')?400:502;
+    return NextResponse.json({ error: error.message }, { status });
   }
 }

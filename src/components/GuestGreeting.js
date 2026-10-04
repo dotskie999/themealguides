@@ -6,6 +6,7 @@ import { CheckCircle2, Loader2, LockKeyhole, MapPin, MapPinned, Save, UserRound,
 import { useGuest } from '@/context/GuestContext';
 import { getMarket, MARKET_OPTIONS, normalizeMarketCode } from '@/lib/markets';
 import LocationPinModal, { preloadLocationMap } from '@/components/LocationPinModal';
+import { DEPLOYMENT_COUNTRY_NAME } from '@/lib/deployment';
 
 export default function GuestGreeting() {
   const { guest, updateGuest } = useGuest();
@@ -37,7 +38,6 @@ export default function GuestGreeting() {
   if (!guest) return null;
   const firstName = guest.customer_name?.trim().split(/\s+/)[0] || 'there';
   const market = getMarket(form?.market_code || guest.market_code);
-  const gpsMarketLocked = guest.market_selection_source === 'gps';
   const update = (event) => setForm((current) => ({ ...current, [event.target.name]: event.target.value }));
 
   const chooseMarket = (event) => {
@@ -52,11 +52,6 @@ export default function GuestGreeting() {
       latitude:null,longitude:null,location_accuracy:null,location_source:null,location_precision:null,
     }));
     setError('');
-  };
-
-  const chooseCountry = (event) => {
-    const firstMarket=MARKET_OPTIONS.find((option)=>option.countryCode===event.target.value);
-    if(firstMarket) chooseMarket({target:{value:firstMarket.code}});
   };
 
   const applyPinnedLocation=(location)=>{
@@ -107,9 +102,8 @@ export default function GuestGreeting() {
       <section className="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title">
         <header><div><p className="kicker">Your saved details</p><h2 id="profile-title">Update your guide card</h2></div><button onClick={() => setOpen(false)} aria-label="Close"><X/></button></header>
         <form onSubmit={save} className="profile-form">
-          <label className={gpsMarketLocked?'locked-market':''}><span>Country {gpsMarketLocked&&<small><LockKeyhole size={12}/> GPS</small>}</span><select value={market.countryCode} onChange={chooseCountry} disabled={gpsMarketLocked}><option value="PH">Philippines</option><option value="GH">Ghana</option></select></label>
-          <label className={gpsMarketLocked?'locked-market':''}><span>Region {gpsMarketLocked&&<small><LockKeyhole size={12}/> GPS</small>}</span><select name="market_code" value={form.market_code} onChange={chooseMarket} disabled={gpsMarketLocked}>{MARKET_OPTIONS.filter((option)=>option.countryCode===market.countryCode).map((option)=><option value={option.code} key={option.code}>{option.region}</option>)}</select></label>
-          {gpsMarketLocked&&<p className="profile-market-lock-note full"><LockKeyhole size={16}/> Country and region were detected by GPS and are locked. Your delivery address can still be updated.</p>}
+          <label className="locked-market"><span>Country <small><LockKeyhole size={12}/> This site</small></span><input value={DEPLOYMENT_COUNTRY_NAME} disabled/></label>
+          <label><span>Region</span><select name="market_code" value={form.market_code} onChange={chooseMarket} disabled={MARKET_OPTIONS.length===1}>{MARKET_OPTIONS.map((option)=><option value={option.code} key={option.code}>{option.region}</option>)}</select></label>
           <label className="full"><span>Customer name</span><input name="customer_name" value={form.customer_name||''} onChange={update} required /></label>
           <label className="full"><span>Email</span><input type="email" name="customer_email" value={form.customer_email||''} onChange={update} required /></label>
           <label className="full"><span>Contact number</span><input name="contact_number" value={form.contact_number||''} onChange={update} inputMode="tel" required /></label>

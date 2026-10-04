@@ -1,10 +1,11 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { DEPLOYMENT_COUNTRY, isDeploymentMarket } from '@/lib/deployment';
 
 const CartContext = createContext(null);
-const CART_KEY = 'tmg-cart-v1';
-const ORDER_KEY = 'tmg-last-order-v1';
+const CART_KEY = `tmg-cart-v1-${DEPLOYMENT_COUNTRY.toLowerCase()}`;
+const ORDER_KEY = `tmg-last-order-v1-${DEPLOYMENT_COUNTRY.toLowerCase()}`;
 
 export function CartProvider({ children }) {
   const [items, setItems] = useState([]);
@@ -12,7 +13,7 @@ export function CartProvider({ children }) {
   useEffect(() => {
     try {
       const stored = JSON.parse(localStorage.getItem(CART_KEY) || '[]');
-      setItems(Array.isArray(stored) ? stored : []);
+      setItems(Array.isArray(stored) ? stored.filter(item=>isDeploymentMarket(item.market_code)) : []);
     } catch { setItems([]); }
     setReady(true);
   }, []);

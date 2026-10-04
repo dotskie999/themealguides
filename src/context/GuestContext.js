@@ -2,9 +2,10 @@
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { DEFAULT_MARKET, getMarket, normalizeMarketCode } from '@/lib/markets';
+import { DEPLOYMENT_COUNTRY } from '@/lib/deployment';
 
 const GuestContext = createContext(null);
-export const GUEST_KEY = 'tmg-guest-v1';
+export const GUEST_KEY = `tmg-guest-v1-${DEPLOYMENT_COUNTRY.toLowerCase()}`;
 
 async function syncGuest(guest, trackVisit = true) {
   const response = await fetch('/api/guest', {
@@ -27,7 +28,7 @@ export function GuestProvider({ children }) {
       if (stored?.guest_id && stored?.consent_at) {
         const marketCode = normalizeMarketCode(stored.market_code || DEFAULT_MARKET);
         const market = getMarket(marketCode);
-        const migratedStored = { ...stored, market_code:marketCode, country_code:stored.country_code || market.countryCode };
+        const migratedStored = { ...stored, market_code:marketCode, country_code:market.countryCode, market_selection_source:'deployment' };
         const safeStored = ['address','map_pin'].includes(migratedStored.location_source) ? migratedStored : {
           ...migratedStored,
           latitude: null,
