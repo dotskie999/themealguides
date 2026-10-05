@@ -4,6 +4,7 @@ import { Check, Loader2, MapPin, Search, X } from 'lucide-react';
 
 const marketCenter={
   'ph-ncr':[14.5995,120.9842,12],
+  'gh-greater-accra':[5.65,-0.05,11],
   'gh-accra':[5.6037,-0.1870,12],
   'gh-tema':[5.6698,0.0166,12],
 };

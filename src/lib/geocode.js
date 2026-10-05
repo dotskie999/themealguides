@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { getMarket, normalizeMarketCode } from '@/lib/markets';
+import { getMarket, isWithinMarketArea, normalizeMarketCode } from '@/lib/markets';
 import { geoapifyConfigured, geoapifyForward, geoapifyReverse } from '@/lib/geoapify';
 
 const runtime = globalThis;
@@ -88,6 +88,7 @@ export async function reverseGeocodeCoordinates(latitudeValue, longitudeValue, m
   const latitude=Number(latitudeValue); const longitude=Number(longitudeValue);
   if(!Number.isFinite(latitude)||latitude < -90||latitude > 90||!Number.isFinite(longitude)||longitude < -180||longitude > 180) throw new Error('Invalid map coordinates.');
   const marketCode=normalizeMarketCode(marketValue);
+  if(!isWithinMarketArea(marketCode,latitude,longitude)) throw new Error(`This delivery point is outside our current ${getMarket(marketCode).region} service area.`);
   if(geoapifyConfigured()){
     const result=await geoapifyReverse({latitude,longitude,marketCode});
     if(!result) throw new Error('No address was found for this map location.');
@@ -103,6 +104,10 @@ export async function reverseGeocodeCoordinates(latitudeValue, longitudeValue, m
     const response=await fetch(url,{cache:'no-store',headers:{Accept:'application/json','Accept-Language':'en','User-Agent':'TheMealGuides/1.0 (https://www.facebook.com/themealguides)'}});
     if(!response.ok) throw new Error('Map address lookup is temporarily unavailable.');
     const result=await response.json(); const address=result?.address||{};
+    if(marketCode==='gh-greater-accra'){
+      const state=String(address.state||address.region||address.state_district||'').toLowerCase();
+      if(state&&!state.includes('greater accra')) throw new Error('This delivery point is outside our current Greater Accra service area.');
+    }
     const city=address.city||address.town||address.municipality||address.county||'';
     const barangay=address.suburb||address.neighbourhood||address.quarter||address.village||address.hamlet||'';
     const road=address.road||address.pedestrian||address.residential||address.path||'';

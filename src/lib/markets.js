@@ -1,4 +1,4 @@
-import { DEFAULT_DEPLOYMENT_MARKET, DEPLOYMENT_COUNTRY, isDeploymentMarket } from '@/lib/deployment';
+import { canonicalDeploymentMarket, DEFAULT_DEPLOYMENT_MARKET, DEPLOYMENT_COUNTRY, isDeploymentMarket } from '@/lib/deployment';
 
 export const DEFAULT_MARKET = DEFAULT_DEPLOYMENT_MARKET;
 
@@ -8,24 +8,31 @@ export const MARKETS = {
     label: 'Metro Manila, Philippines', currency: 'PHP', locale: 'en-PH', phonePrefix: '+63',
     cityLabel: 'City / Municipality', areaLabel: 'Barangay', digitalAddress: false,
   },
-  'gh-accra': {
-    code: 'gh-accra', countryCode: 'GH', country: 'Ghana', region: 'Accra',
-    label: 'Accra, Ghana', currency: 'GHS', locale: 'en-GH', phonePrefix: '+233',
-    cityLabel: 'Municipal assembly', areaLabel: 'Area / Suburb', digitalAddress: true,
-  },
-  'gh-tema': {
-    code: 'gh-tema', countryCode: 'GH', country: 'Ghana', region: 'Tema',
-    label: 'Tema, Ghana', currency: 'GHS', locale: 'en-GH', phonePrefix: '+233',
+  'gh-greater-accra': {
+    code: 'gh-greater-accra', countryCode: 'GH', country: 'Ghana', region: 'Greater Accra',
+    label: 'Greater Accra, Ghana', currency: 'GHS', locale: 'en-GH', phonePrefix: '+233',
     cityLabel: 'Municipal assembly', areaLabel: 'Area / Suburb', digitalAddress: true,
   },
 };
 
 export const ALL_MARKET_OPTIONS = Object.values(MARKETS);
 export const MARKET_OPTIONS = ALL_MARKET_OPTIONS.filter((market)=>market.countryCode===DEPLOYMENT_COUNTRY);
-export const getMarket = (code) => MARKETS[code] || MARKETS[DEFAULT_MARKET];
-export const normalizeMarketCode = (code) => MARKETS[code] && isDeploymentMarket(code) ? code : DEFAULT_MARKET;
+export const getMarket = (code) => MARKETS[canonicalDeploymentMarket(code)] || MARKETS[DEFAULT_MARKET];
+export const normalizeMarketCode = (code) => {
+  const canonical=canonicalDeploymentMarket(code);
+  return MARKETS[canonical]&&isDeploymentMarket(canonical)?canonical:DEFAULT_MARKET;
+};
 
 const inside = (latitude, longitude, bounds) => latitude >= bounds.south && latitude <= bounds.north && longitude >= bounds.west && longitude <= bounds.east;
+
+export function isWithinMarketArea(marketCode, latitudeValue, longitudeValue) {
+  const latitude=Number(latitudeValue); const longitude=Number(longitudeValue);
+  if(!Number.isFinite(latitude)||!Number.isFinite(longitude)) return false;
+  const code=getMarket(marketCode).code;
+  if(code==='ph-ncr') return inside(latitude,longitude,{south:14.3,north:14.95,west:120.75,east:121.35});
+  if(code==='gh-greater-accra') return inside(latitude,longitude,{south:5.3,north:6.2,west:-0.7,east:0.5});
+  return false;
+}
 
 export function detectMarketFromCoordinates(latitudeValue, longitudeValue) {
   const latitude = Number(latitudeValue);
@@ -42,11 +49,7 @@ export function detectMarketFromCoordinates(latitudeValue, longitudeValue) {
   if (ghana) {
     const launchArea = inside(latitude, longitude, { south:5.35, north:6.05, west:-0.7, east:0.45 });
     if (!launchArea) return { supported:false, countryCode:'GH', marketCode:null };
-    const accra = { latitude:5.6037, longitude:-0.1870 };
-    const tema = { latitude:5.6698, longitude:0.0166 };
-    const accraDistance = Math.hypot(latitude-accra.latitude,(longitude-accra.longitude)*Math.cos(latitude*Math.PI/180));
-    const temaDistance = Math.hypot(latitude-tema.latitude,(longitude-tema.longitude)*Math.cos(latitude*Math.PI/180));
-    return { supported:true, countryCode:'GH', marketCode:temaDistance<accraDistance?'gh-tema':'gh-accra' };
+    return { supported:true, countryCode:'GH', marketCode:'gh-greater-accra' };
   }
 
   return { supported:false, countryCode:null, marketCode:null };
@@ -58,7 +61,7 @@ export const marketMoney = (value, code = DEFAULT_MARKET) => {
 };
 
 export const GHANA_LOCATIONS = {
-  'gh-accra': [
+  'gh-greater-accra': [
     ['accra-metropolitan','Accra Metropolitan Assembly (AMA)',['Jamestown','Ussher Town','Makola','Agbogbloshie','Korle Bu','Chorkor','Mamprobi','Korle Gonno','Palladium']],
     ['korle-klottey','Korle Klottey Municipal Assembly',['Osu','Adabraka','Asylum Down','North Ridge','West Ridge','Ministries','Tudu','Odawna']],
     ['la-dade-kotopon','La Dade Kotopon Municipal Assembly (LaDMA)',['La (Labadi)','Cantonments','Labone','Airport Residential Area','Airport Hills','Tse Addo','Burma Camp','South La']],
@@ -80,8 +83,6 @@ export const GHANA_LOCATIONS = {
     ['ga-south','Ga South Municipal Assembly',['Weija','Gbawe','McCarthy Hill','Mallam','Bortianor','Kokrobite','Kasoa Toll Booth Area']],
     ['ledzokuku','Ledzokuku Municipal Assembly (LeKMA)',['Teshie','Teshie Nungua Estates (shared)','Tsuibleoo','Agblezaa','Teshie Camp']],
     ['krowor','Krowor Municipal Assembly (KroMA)',['Nungua','Greda Estate','Buade','Sakumono Estate (border area)']],
-  ],
-  'gh-tema': [
     ['tema-west','Tema West Municipal Assembly',['Sakumono','Lashibi','Baatsona (Spintex Road)','Klagon','Adjei Kojo','Borteyman','Community 13','Community 14','Community 15','Community 16','Community 17','Community 18','Community 19','Community 20']],
     ['tema-metropolitan','Tema Metropolitan Assembly (TMA)',['Community 1','Community 2','Community 3','Community 4','Community 5','Community 6','Community 7','Community 8','Community 9','Community 10','Community 11','Community 12','Tema Manhean (Tema Newtown)','Bankuman','Heavy Industrial Area','Light Industrial Area']],
     ['ashaiman','Ashaiman Municipal Assembly',['Ashaiman Zongo','Lebanon','Official Town','Taifa (Ashaiman)','Valco Flats','Jericho','Night Market area']],

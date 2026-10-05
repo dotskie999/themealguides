@@ -5,11 +5,11 @@ This project uses one GitHub repository and one Supabase project, with two indep
 | Deployment | Domain | Country scope | Markets |
 | --- | --- | --- | --- |
 | Philippines | `order.themealguides.com` | `PH` | `ph-ncr` |
-| Ghana | `gh.themealguides.com` | `GH` | `gh-accra`, `gh-tema` |
+| Ghana | `gh.themealguides.com` | `GH` | `gh-greater-accra` |
 
 ## 1. Update Supabase
 
-Run `DEPLOYMENT_SEPARATION_MIGRATION.sql` once in Supabase **SQL Editor**. Existing staff accounts and activity logs are assigned to the Philippines deployment.
+Run `DEPLOYMENT_SEPARATION_MIGRATION.sql` once in Supabase **SQL Editor**. Existing staff accounts and activity logs are assigned to the Philippines deployment. Then run `GREATER_ACCRA_MARKET_MIGRATION.sql` to consolidate the former Accra and Tema market codes into one Greater Accra service region.
 
 Confirm the result:
 
@@ -118,7 +118,7 @@ Do not copy the PH emergency PIN or session secret into the Ghana project.
 ## 6. Verification checklist
 
 - PH storefront shows only `ph-*` restaurants and no country selector.
-- Ghana storefront shows only `gh-*` restaurants and offers Accra/Tema only.
+- Ghana storefront shows only Greater Accra restaurants and does not ask guests to choose Accra or Tema.
 - PH `/admin` rejects Ghana staff accounts.
 - Ghana `/admin` rejects PH staff accounts.
 - Each admin sees only its country’s orders, guests, restaurants, menus, add-ons, staff, and activity.

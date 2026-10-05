@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { Bell, BellRing, CalendarDays, Check, ChefHat, ChevronDown, CircleDollarSign, ClipboardList, Download, Eye, Filter, KeyRound, Layers3, Loader2, LockKeyhole, LogOut, Mail, MapPin, Phone, Plus, RefreshCw, Save, Settings2, ShieldAlert, Store, Trash2, Truck, UserRound, Users, Utensils, X } from 'lucide-react';
 import { normalizeImageUrl } from '@/lib/images';
-import { MARKET_OPTIONS, marketMoney } from '@/lib/markets';
+import { MARKET_OPTIONS, marketMoney, normalizeMarketCode } from '@/lib/markets';
 import AdminPasswordChange from '@/components/AdminPasswordChange';
 import { DEFAULT_WEEKLY_HOURS, marketTimezone, normalizeWeeklyHours, RESTAURANT_DAYS, restaurantAvailability } from '@/lib/restaurantHours';
 import { DEFAULT_DEPLOYMENT_MARKET, DEPLOYMENT_COUNTRY, DEPLOYMENT_COUNTRY_NAME, DEPLOYMENT_TIMEZONE } from '@/lib/deployment';
@@ -115,9 +115,9 @@ export default function AdminClient({session}) {
   }),[data.guests,guestSort]);
   const filteredRestaurants = useMemo(() => {
     const marketOrder = new Map(MARKET_OPTIONS.map((market,index) => [market.code,index]));
-    const restaurants = restaurantMarket === 'all' ? data.restaurants : data.restaurants.filter(restaurant => String(restaurant.market_code || DEFAULT_DEPLOYMENT_MARKET) === restaurantMarket);
+    const restaurants = restaurantMarket === 'all' ? data.restaurants : data.restaurants.filter(restaurant => normalizeMarketCode(restaurant.market_code) === restaurantMarket);
     return restaurants.slice().sort((a,b) => {
-      const marketDifference = (marketOrder.get(a.market_code || DEFAULT_DEPLOYMENT_MARKET) ?? Number.MAX_SAFE_INTEGER) - (marketOrder.get(b.market_code || DEFAULT_DEPLOYMENT_MARKET) ?? Number.MAX_SAFE_INTEGER);
+      const marketDifference = (marketOrder.get(normalizeMarketCode(a.market_code)) ?? Number.MAX_SAFE_INTEGER) - (marketOrder.get(normalizeMarketCode(b.market_code)) ?? Number.MAX_SAFE_INTEGER);
       const aPosition = Number(a.sort_order) > 0 ? Number(a.sort_order) : Number.MAX_SAFE_INTEGER;
       const bPosition = Number(b.sort_order) > 0 ? Number(b.sort_order) : Number.MAX_SAFE_INTEGER;
       return marketDifference || aPosition - bPosition || String(a.name || '').localeCompare(String(b.name || ''));
@@ -171,7 +171,7 @@ export default function AdminClient({session}) {
     const defaultMarket=restaurantMarket!=='all'?restaurantMarket:DEFAULT_DEPLOYMENT_MARKET;
     const defaults={restaurant:{restaurant_id:'',market_code:defaultMarket,name:'',address:'',latitude:'',longitude:'',delivery_radius_km:10,sort_order:1,logo_url:'',banner_url:'',description:'',active:'yes',timezone:marketTimezone(defaultMarket),weekly_hours:DEFAULT_WEEKLY_HOURS,orders_paused:false,pause_message:''},category:{category_id:'',restaurant_id:restaurantId,name:'',active:'yes',sort_order:1},menu:{item_id:'',restaurant_id:restaurantId,category_id:firstCategory?.category_id||'',name:'',description:'',base_price:'',photo_url:'',active:'yes',sort_order:1},group:{group_id:'',scope:'category',scope_category_id:selectedCategory,category_id:selectedCategory,item_id:'',group_name:'',selection_type:'multiple',required:'no',sort_order:1},option:{option_id:'',group_id:selectedGroup,option_name:'',price:0,sort_order:1},account:{user_id:'',display_name:'',username:'',password:'',role:'inventory',active:true},delivery:{market_code:'ph-ncr',base_distance_km:2.2,base_fare:38,additional_per_km:6,max_internal_distance_km:7.2,peak_surcharge:25,lunch_peak_start:'11:00',lunch_peak_end:'13:30',dinner_peak_start:'17:00',dinner_peak_end:'20:30',storm_surcharge:30,storm_active:false,active:true}};
     const nextRecord={...defaults[type],...record};
-    if(type==='restaurant') nextRecord.weekly_hours=normalizeWeeklyHours(record.weekly_hours||DEFAULT_WEEKLY_HOURS);
+    if(type==='restaurant') { nextRecord.market_code=normalizeMarketCode(record.market_code||defaultMarket); nextRecord.weekly_hours=normalizeWeeklyHours(record.weekly_hours||DEFAULT_WEEKLY_HOURS); }
     if(type==='group') Object.assign(nextRecord,{scope:record.item_id?'item':'category',scope_category_id:record.category_id||targetItem?.category_id||selectedCategory});
     setEditor({type,record:nextRecord});
   };
@@ -210,7 +210,7 @@ export default function AdminClient({session}) {
         </div>
         <AdminCollection title="Restaurant brands" count={filteredRestaurants.length} emptyLabel="restaurants in this market" description="Set a storefront position to control which restaurant appears first in each market." action="Add restaurant" onAdd={()=>edit('restaurant')} loading={loading}>
           {filteredRestaurants.map(r=>{
-            const market=MARKET_OPTIONS.find(option=>option.code===(r.market_code||DEFAULT_DEPLOYMENT_MARKET));
+            const market=MARKET_OPTIONS.find(option=>option.code===normalizeMarketCode(r.market_code));
             const availability=restaurantAvailability(r);
             return <article className="entity-card" key={r.restaurant_id}><div className="entity-image">{normalizeImageUrl(r.logo_url)?<Image src={normalizeImageUrl(r.logo_url)} alt="" fill sizes="76px" unoptimized referrerPolicy="no-referrer"/>:<Store/>}</div><div><span className={`entity-status ${availability.isOpen?'on':'closed'}`}>{availability.label}</span><h3>{r.name}</h3><p>{r.description}</p><small>{market?.label||r.market_code} · {availability.detail} · {Number(r.sort_order)>0?`Position ${r.sort_order}`:'No position set'}</small></div><button onClick={()=>edit('restaurant',r)}><Settings2/> Edit</button></article>;
           })}

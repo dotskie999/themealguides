@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CheckCircle2, Loader2, LockKeyhole, MapPin, MapPinned, Save, UserRound, X } from 'lucide-react';
 import { useGuest } from '@/context/GuestContext';
-import { getMarket, MARKET_OPTIONS, normalizeMarketCode } from '@/lib/markets';
+import { getMarket, normalizeMarketCode } from '@/lib/markets';
 import LocationPinModal, { preloadLocationMap } from '@/components/LocationPinModal';
 import { DEPLOYMENT_COUNTRY_NAME } from '@/lib/deployment';
 
@@ -39,20 +39,6 @@ export default function GuestGreeting() {
   const firstName = guest.customer_name?.trim().split(/\s+/)[0] || 'there';
   const market = getMarket(form?.market_code || guest.market_code);
   const update = (event) => setForm((current) => ({ ...current, [event.target.name]: event.target.value }));
-
-  const chooseMarket = (event) => {
-    const marketCode=event.target.value;
-    const nextMarket=getMarket(marketCode);
-    setForm((current)=>({
-      ...current,
-      market_code:marketCode,
-      country_code:nextMarket.countryCode,
-      contact_number:nextMarket.phonePrefix,
-      city:'',city_code:'',barangay:'',house_number:'',formatted_address:'',digital_address:'',
-      latitude:null,longitude:null,location_accuracy:null,location_source:null,location_precision:null,
-    }));
-    setError('');
-  };
 
   const applyPinnedLocation=(location)=>{
     if(!location) throw new Error('Select a location on the map first.');
@@ -103,7 +89,7 @@ export default function GuestGreeting() {
         <header><div><p className="kicker">Your saved details</p><h2 id="profile-title">Update your guide card</h2></div><button onClick={() => setOpen(false)} aria-label="Close"><X/></button></header>
         <form onSubmit={save} className="profile-form">
           <label className="locked-market"><span>Country <small><LockKeyhole size={12}/> This site</small></span><input value={DEPLOYMENT_COUNTRY_NAME} disabled/></label>
-          <label><span>Region</span><select name="market_code" value={form.market_code} onChange={chooseMarket} disabled={MARKET_OPTIONS.length===1}>{MARKET_OPTIONS.map((option)=><option value={option.code} key={option.code}>{option.region}</option>)}</select></label>
+          <label className="locked-market"><span>Service region <small><LockKeyhole size={12}/> This site</small></span><input value={market.region} disabled/></label>
           <label className="full"><span>Customer name</span><input name="customer_name" value={form.customer_name||''} onChange={update} required /></label>
           <label className="full"><span>Email</span><input type="email" name="customer_email" value={form.customer_email||''} onChange={update} required /></label>
           <label className="full"><span>Contact number</span><input name="contact_number" value={form.contact_number||''} onChange={update} inputMode="tel" required /></label>

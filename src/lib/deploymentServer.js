@@ -12,11 +12,11 @@ export function serverDeploymentCountry() {
 }
 
 export function serverMarketCodes() {
-  return serverDeploymentCountry()==='GH' ? ['gh-accra','gh-tema'] : ['ph-ncr'];
+  return serverDeploymentCountry()==='GH' ? ['gh-greater-accra','gh-accra','gh-tema'] : ['ph-ncr'];
 }
 
 export function serverDefaultMarket() {
-  return serverDeploymentCountry()==='GH' ? 'gh-accra' : 'ph-ncr';
+  return serverDeploymentCountry()==='GH' ? 'gh-greater-accra' : 'ph-ncr';
 }
 
 export function isServerMarket(code) {
@@ -26,5 +26,5 @@ export function isServerMarket(code) {
 export function assertServerMarket(code) {
   const normalized=String(code || '').trim().toLowerCase();
   if(!isServerMarket(normalized)) throw new Error(`This ${serverDeploymentCountry()} deployment cannot access the selected market.`);
-  return normalized;
+  return ['gh-accra','gh-tema'].includes(normalized)?'gh-greater-accra':normalized;
 }

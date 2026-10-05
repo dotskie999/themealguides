@@ -2,7 +2,7 @@ import 'server-only';
 
 import crypto from 'crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { getMarket } from '@/lib/markets';
+import { getMarket, isWithinMarketArea } from '@/lib/markets';
 import { calculateDeliveryQuote, DEFAULT_DELIVERY_SETTINGS, normalizeDeliverySettings } from '@/lib/delivery';
 import { geocodeDeliveryArea } from '@/lib/geocode';
 import { geoapifyDrivingRoute } from '@/lib/geoapify';
@@ -260,7 +260,7 @@ export async function submitOrder(payload = {}) {
 
   const restaurantLocation=await scopedRestaurant(restaurantId,true);
   const marketCode=assertServerMarket(restaurantLocation.market_code);
-  if(payload.market_code&&String(payload.market_code)!==marketCode) throw new Error('This order belongs to a different deployment market.');
+  if(payload.market_code&&assertServerMarket(payload.market_code)!==marketCode) throw new Error('This order belongs to a different deployment market.');
   const market = getMarket(marketCode);
 
   for (const field of ['customer_name', 'contact_number', 'city', 'barangay', 'house_number']) {
@@ -272,6 +272,9 @@ export async function submitOrder(payload = {}) {
   const fulfillmentType=payload.fulfillment_type==='pickup'?'pickup':'doorstep';
   let deliveryLatitude = payload.latitude === null || payload.latitude === undefined ? null : Number(payload.latitude);
   let deliveryLongitude = payload.longitude === null || payload.longitude === undefined ? null : Number(payload.longitude);
+  if(fulfillmentType==='doorstep'&&Number.isFinite(deliveryLatitude)&&Number.isFinite(deliveryLongitude)&&!isWithinMarketArea(marketCode,deliveryLatitude,deliveryLongitude)){
+    throw new Error(`This delivery point is outside our current ${market.region} service area.`);
+  }
   if(fulfillmentType==='doorstep'&&marketCode==='ph-ncr'){
     const hasConfirmedPin=payload.location_source==='map_pin'&&Number.isFinite(deliveryLatitude)&&Number.isFinite(deliveryLongitude);
     if(!hasConfirmedPin){
@@ -371,6 +374,9 @@ export async function saveGuest(payload = {}) {
   if ((latitude !== null && (!Number.isFinite(latitude) || latitude < -90 || latitude > 90))
     || (longitude !== null && (!Number.isFinite(longitude) || longitude < -180 || longitude > 180))) {
     throw new Error('Invalid location coordinates.');
+  }
+  if(latitude!==null&&longitude!==null&&!isWithinMarketArea(marketCode,latitude,longitude)){
+    throw new Error(`This delivery point is outside our current ${market.region} service area.`);
   }
 
   const { data: existing, error: readError } = await supabaseAdmin

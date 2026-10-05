@@ -1,11 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import Image from 'next/image';
 import { ArrowRight, Loader2, MapPin, ShieldCheck, Sparkles } from 'lucide-react';
 import { useGuest } from '@/context/GuestContext';
-import { getMarket, MARKET_OPTIONS } from '@/lib/markets';
+import { getMarket } from '@/lib/markets';
 import { DEFAULT_DEPLOYMENT_MARKET, DEPLOYMENT_COUNTRY, DEPLOYMENT_COUNTRY_NAME } from '@/lib/deployment';
 
 const defaultMarket=getMarket(DEFAULT_DEPLOYMENT_MARKET);
@@ -47,11 +47,6 @@ export default function DeploymentGuestGate({ children }) {
   }, [exempt, guest, guestReady, step, form.market_code]);
 
   const update = (event) => { const { name,value,checked,type }=event.target; setForm((current)=>({...current,[name]:type==='checkbox'?checked:value})); };
-  const chooseMarket = useCallback((marketCode) => {
-    const chosen=getMarket(marketCode);
-    setForm((current)=>({...current,market_code:chosen.code,country_code:DEPLOYMENT_COUNTRY,contact_number:chosen.phonePrefix,city:'',city_code:'',barangay:'',latitude:null,longitude:null,location_source:null}));
-    setCities([]); setBarangays([]); setError('');
-  }, []);
   const chooseCity = async (event) => {
     const cityCode=event.target.value; const city=cities.find((entry)=>entry.code===cityCode)?.name||'';
     setForm((current)=>({...current,city_code:cityCode,city,barangay:'',latitude:null,longitude:null,location_source:null})); setBarangays([]);
@@ -77,7 +72,7 @@ export default function DeploymentGuestGate({ children }) {
   return <main className="guest-onboarding"><section className="guest-card"><Image src="/the-meal-guides-logo.png" alt="The Meal Guides" width={150} height={100} priority/>
     {step==='location'?<><span className="guest-step"><MapPin size={15}/> {DEPLOYMENT_COUNTRY_NAME} ordering</span><h1>Where should we guide the feast?</h1><p>Choose your local delivery area now. You can pinpoint the exact doorstep during checkout.</p><form onSubmit={confirmLocation} className="guest-form">
       <label><span>Country</span><input value={DEPLOYMENT_COUNTRY_NAME} disabled aria-label="Ordering country"/></label>
-      <label><span>Region</span><select value={form.market_code} onChange={(event)=>chooseMarket(event.target.value)} disabled={MARKET_OPTIONS.length===1} required>{MARKET_OPTIONS.map(option=><option value={option.code} key={option.code}>{option.region}</option>)}</select></label>
+      <label className="locked-market"><span>Service region <small><ShieldCheck size={12}/> This site</small></span><input value={market.region} disabled aria-label="Service region"/></label>
       <label><span>{market.cityLabel}</span><select name="city_code" value={form.city_code} onChange={chooseCity} required disabled={loadingLocations&&!cities.length}><option value="">{loadingLocations&&!cities.length?'Loading locations…':`Select ${market.cityLabel.toLowerCase()}`}</option>{cities.map((city)=><option value={city.code} key={city.code}>{city.name}</option>)}</select></label>
       <label><span>{market.areaLabel}</span><select name="barangay" value={form.barangay} onChange={update} required disabled={!form.city_code||loadingLocations}><option value="">{loadingLocations&&form.city_code?'Loading areas…':`Select ${market.areaLabel.toLowerCase()}`}</option>{barangays.map((area)=><option value={area.name} key={area.code}>{area.name}</option>)}</select></label>
       <label className="full"><span>House number / Street</span><input name="house_number" value={form.house_number} onChange={update} placeholder={DEPLOYMENT_COUNTRY==='GH'?'House number and street':'123 Mabini Street'} required/></label>
