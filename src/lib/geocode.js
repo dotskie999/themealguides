@@ -92,7 +92,9 @@ export async function reverseGeocodeCoordinates(latitudeValue, longitudeValue, m
   if(geoapifyConfigured()){
     const result=await geoapifyReverse({latitude,longitude,marketCode});
     if(!result) throw new Error('No address was found for this map location.');
-    return result;
+    // The provider's coordinates belong to its nearest mapped feature. Use
+    // that feature only as the label and preserve the customer's exact pin.
+    return {...result,latitude,longitude};
   }
   const task=runtime.__tmgGeocodeQueue.then(async()=>{
     const wait=Math.max(0,1100-(Date.now()-runtime.__tmgLastGeocodeAt));
