@@ -262,16 +262,24 @@ export async function submitOrder(payload = {}) {
   const marketCode=assertServerMarket(restaurantLocation.market_code);
   if(payload.market_code&&assertServerMarket(payload.market_code)!==marketCode) throw new Error('This order belongs to a different deployment market.');
   const market = getMarket(marketCode);
+  const fulfillmentType=payload.fulfillment_type==='pickup'?'pickup':'doorstep';
+  let deliveryLatitude = payload.latitude === null || payload.latitude === undefined ? null : Number(payload.latitude);
+  let deliveryLongitude = payload.longitude === null || payload.longitude === undefined ? null : Number(payload.longitude);
+  const pinnedAddress=String(payload.formatted_address||'').trim();
+  const city=String(payload.city||(market.countryCode==='GH'?market.region:'')).trim();
+  const barangay=String(payload.barangay||(market.countryCode==='GH'?(city||'Pinned location'):'')).trim();
+  const houseNumber=String(payload.house_number||(market.countryCode==='GH'?(pinnedAddress||'Map pin'):'')).trim();
 
-  for (const field of ['customer_name', 'contact_number', 'city', 'barangay', 'house_number']) {
+  for (const field of ['customer_name', 'contact_number']) {
     if (!String(payload[field] || '').trim()) throw new Error('Please complete all required customer details.');
+  }
+  if(!city||!barangay||!houseNumber) throw new Error('Please complete all required customer details.');
+  if(market.countryCode==='GH'&&fulfillmentType==='doorstep'&&(payload.location_source!=='map_pin'||!pinnedAddress||!Number.isFinite(deliveryLatitude)||!Number.isFinite(deliveryLongitude))){
+    throw new Error('Confirm the exact Greater Accra delivery pin before placing the order.');
   }
 
   const items = await buildOrderItems(restaurantId, requestedItems);
   const subtotal = items.reduce((sum, item) => sum + item.total_price, 0);
-  const fulfillmentType=payload.fulfillment_type==='pickup'?'pickup':'doorstep';
-  let deliveryLatitude = payload.latitude === null || payload.latitude === undefined ? null : Number(payload.latitude);
-  let deliveryLongitude = payload.longitude === null || payload.longitude === undefined ? null : Number(payload.longitude);
   if(fulfillmentType==='doorstep'&&Number.isFinite(deliveryLatitude)&&Number.isFinite(deliveryLongitude)&&!isWithinMarketArea(marketCode,deliveryLatitude,deliveryLongitude)){
     throw new Error(`This delivery point is outside our current ${market.region} service area.`);
   }
@@ -307,9 +315,9 @@ export async function submitOrder(payload = {}) {
       customer_name: String(payload.customer_name).trim(),
       customer_email: String(payload.customer_email || '').trim() || null,
       contact_number: String(payload.contact_number).trim(),
-      city: String(payload.city).trim(),
-      barangay: String(payload.barangay).trim(),
-      house_number: String(payload.house_number).trim(),
+      city,
+      barangay,
+      house_number:houseNumber,
       landmark: String(payload.landmark || '').trim(),
       digital_address: String(payload.digital_address || '').trim(),
       market_code: marketCode,
@@ -354,13 +362,14 @@ export async function saveGuest(payload = {}) {
   const customerName = String(payload.customer_name || '').trim();
   const customerEmail = String(payload.customer_email || '').trim().toLowerCase();
   const contactNumber = String(payload.contact_number || '').replace(/\s/g, '');
-  const city = String(payload.city || '').trim();
-  const barangay = String(payload.barangay || '').trim();
-  const houseNumber = String(payload.house_number || '').trim();
   const landmark = String(payload.landmark || '').trim();
   const digitalAddress = String(payload.digital_address || '').trim();
   const marketCode = assertServerMarket(payload.market_code||serverDefaultMarket());
   const market = getMarket(marketCode);
+  const pinnedAddress=String(payload.formatted_address||'').trim();
+  const city = String(payload.city||(market.countryCode==='GH'?market.region:'')).trim();
+  const barangay = String(payload.barangay||(market.countryCode==='GH'?(city||'Pinned location'):'')).trim();
+  const houseNumber = String(payload.house_number||(market.countryCode==='GH'?(pinnedAddress||'Map pin'):'')).trim();
   const latitude = payload.latitude === null || payload.latitude === undefined ? null : Number(payload.latitude);
   const longitude = payload.longitude === null || payload.longitude === undefined ? null : Number(payload.longitude);
   const locationAccuracy = payload.location_accuracy === null || payload.location_accuracy === undefined ? null : Number(payload.location_accuracy);
@@ -371,6 +380,9 @@ export async function saveGuest(payload = {}) {
   const validPhone=market.countryCode==='GH'?/^\+233\d{9}$/.test(contactNumber):/^\+63\d{10}$/.test(contactNumber);
   if (!validPhone) throw new Error(`Enter a valid ${market.country} contact number.`);
   if (!payload.consent_at) throw new Error('Consent is required before guest details can be saved.');
+  if(market.countryCode==='GH'&&(payload.location_source!=='map_pin'||!pinnedAddress||!Number.isFinite(latitude)||!Number.isFinite(longitude))){
+    throw new Error('Confirm the exact Greater Accra delivery pin before continuing.');
+  }
   if ((latitude !== null && (!Number.isFinite(latitude) || latitude < -90 || latitude > 90))
     || (longitude !== null && (!Number.isFinite(longitude) || longitude < -180 || longitude > 180))) {
     throw new Error('Invalid location coordinates.');

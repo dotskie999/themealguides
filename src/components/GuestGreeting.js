@@ -25,7 +25,7 @@ export default function GuestGreeting() {
       market_code:marketCode,
       country_code:market.countryCode,
       contact_number:guest.contact_number || market.phonePrefix,
-      formatted_address:guest.formatted_address || [guest.house_number,guest.barangay,guest.city].filter(Boolean).join(', '),
+      formatted_address:market.countryCode==='GH'&&guest.location_source!=='map_pin'?'':(guest.formatted_address || [guest.house_number,guest.barangay,guest.city].filter(Boolean).join(', ')),
     });
     setError('');
   }, [open, guest]);
@@ -42,10 +42,11 @@ export default function GuestGreeting() {
 
   const applyPinnedLocation=(location)=>{
     if(!location) throw new Error('Select a location on the map first.');
-    const city=location.city||form.city;
-    const barangay=location.barangay||form.barangay||city;
-    const houseNumber=location.house_number||location.formatted;
-    if(!city||!barangay||!houseNumber) throw new Error('Choose a more specific street address before confirming.');
+    const isGhana=market.countryCode==='GH';
+    const city=location.city||form.city||(isGhana?market.region:'');
+    const barangay=location.barangay||form.barangay||city||(isGhana?'Pinned location':'');
+    const houseNumber=location.house_number||location.formatted||(isGhana?'Map pin':'');
+    if(!city||!barangay||!houseNumber||!location.formatted) throw new Error('Choose a more specific delivery point before confirming.');
     setForm((current)=>({
       ...current,
       city,
@@ -58,6 +59,7 @@ export default function GuestGreeting() {
       location_accuracy:null,
       location_source:'map_pin',
       location_precision:'pin',
+      digital_address:isGhana?'':current.digital_address,
     }));
     setError('');
     setMapOpen(false);
@@ -68,7 +70,7 @@ export default function GuestGreeting() {
     const phone=String(form.contact_number||'').replace(/\s/g,'');
     const valid=form.market_code.startsWith('gh-')?/^\+233\d{9}$/.test(phone):/^\+63\d{10}$/.test(phone);
     if (!valid) { setError(`Use a valid ${market.country} number beginning with ${market.phonePrefix}.`); return; }
-    if(!form.formatted_address||!Number.isFinite(Number(form.latitude))||!Number.isFinite(Number(form.longitude))){
+    if(!form.formatted_address||!Number.isFinite(Number(form.latitude))||!Number.isFinite(Number(form.longitude))||(market.countryCode==='GH'&&form.location_source!=='map_pin')){
       setError('Choose and confirm your delivery address on the map.'); return;
     }
     setSaving(true);
@@ -93,16 +95,15 @@ export default function GuestGreeting() {
           <label className="full"><span>Customer name</span><input name="customer_name" value={form.customer_name||''} onChange={update} required /></label>
           <label className="full"><span>Email</span><input type="email" name="customer_email" value={form.customer_email||''} onChange={update} required /></label>
           <label className="full"><span>Contact number</span><input name="contact_number" value={form.contact_number||''} onChange={update} inputMode="tel" required /></label>
-          <button type="button" className="map-pin-button full" onClick={()=>setMapOpen(true)}><MapPinned/><span><strong>{form.formatted_address?'Edit delivery location':'Choose delivery location'}</strong><small>Search your complete address or move the map pin</small></span>{form.location_source==='map_pin'&&<i><CheckCircle2/> Confirmed</i>}</button>
+          <button type="button" className="map-pin-button full" onClick={()=>setMapOpen(true)}><MapPinned/><span><strong>{form.formatted_address?'Edit delivery location':'Choose delivery location'}</strong><small>{market.countryCode==='GH'?'Use your GPS, search, or move the delivery pin':'Search your complete address or move the map pin'}</small></span>{form.location_source==='map_pin'&&<i><CheckCircle2/> Confirmed</i>}</button>
           <div className="locked-address full"><MapPin/><span><small>Confirmed delivery address</small><strong>{form.formatted_address||'No location confirmed yet'}</strong></span><LockKeyhole aria-label="Locked"/></div>
           <label className="full"><span>Landmark / address hint <small>Optional</small></span><input name="landmark" value={form.landmark||''} onChange={update} placeholder="Nearby landmark, gate color, or building" /></label>
-          {market.digitalAddress&&<label className="full"><span>GhanaPost GPS digital address <small>Optional</small></span><input name="digital_address" value={form.digital_address||''} onChange={update} placeholder="Example: GA-123-4567" /></label>}
           <p className="profile-privacy full"><UserRound size={17}/> Changes are saved to this browser and your secure guest profile. Delivery distance uses the confirmed map pin.</p>
           {error&&<p className="form-error full">{error}</p>}
           <footer className="full"><button type="button" className="secondary-button" onClick={()=>setOpen(false)}>Cancel</button><button className="primary-button" disabled={saving}>{saving?<Loader2 className="spin"/>:<Save/>}{saving?'Saving…':'Save details'}</button></footer>
         </form>
       </section>
     </div>, document.body)}
-    {mapOpen&&form&&createPortal(<LocationPinModal marketCode={form.market_code} latitude={form.latitude} longitude={form.longitude} address={form.formatted_address||[form.house_number,form.barangay,form.city].filter(Boolean).join(', ')} initialLocation={{city:form.city,barangay:form.barangay,house_number:form.house_number}} onClose={()=>setMapOpen(false)} onConfirm={applyPinnedLocation}/>,document.body)}
+    {mapOpen&&form&&createPortal(<LocationPinModal marketCode={form.market_code} latitude={form.latitude} longitude={form.longitude} address={market.countryCode==='GH'?form.formatted_address:(form.formatted_address||[form.house_number,form.barangay,form.city].filter(Boolean).join(', '))} initialLocation={{city:form.city,barangay:form.barangay,house_number:form.house_number}} onClose={()=>setMapOpen(false)} onConfirm={applyPinnedLocation}/>,document.body)}
   </>;
 }

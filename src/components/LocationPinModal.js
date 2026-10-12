@@ -18,6 +18,7 @@ export function preloadLocationMap(){
 export default function LocationPinModal({marketCode,latitude,longitude,address='',initialLocation=null,onClose,onConfirm}) {
   const mapElement=useRef(null); const mapInstance=useRef(null); const markerInstance=useRef(null);
   const suggestionCache=useRef(new Map());
+  const reverseRequest=useRef(0);
   const [query,setQuery]=useState(address); const [selection,setSelection]=useState(null); const [suggestions,setSuggestions]=useState([]);
   const [loading,setLoading]=useState(false); const [suggestionsLoading,setSuggestionsLoading]=useState(false); const [saving,setSaving]=useState(false); const [dirty,setDirty]=useState(false); const [error,setError]=useState('');
 
@@ -34,13 +35,14 @@ export default function LocationPinModal({marketCode,latitude,longitude,address=
       const icon=L.divIcon({className:'map-pin-marker',html:'<span></span>',iconSize:[34,44],iconAnchor:[17,42]});
       const marker=L.marker(center,{draggable:true,icon}).addTo(map); mapInstance.current=map; markerInstance.current=marker;
       async function choosePoint(point){
+        const requestId=++reverseRequest.current;
         marker.setLatLng(point); setLoading(true); setError(''); setSuggestions([]);
         try{
           const response=await fetch('/api/reverse-geocode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({latitude:point.lat,longitude:point.lng,market_code:marketCode})});
           const result=await response.json();
           if(!response.ok||!result.location) throw new Error(result.error||'No address found for this pin.');
-          if(!disposed){setSelection(result.location);setQuery(result.location.formatted||'');setDirty(false);}
-        } catch(reason){if(!disposed){setSelection(null);setError(reason.message);}} finally{if(!disposed)setLoading(false);}
+          if(!disposed&&requestId===reverseRequest.current){setSelection(result.location);setQuery(result.location.formatted||'');setDirty(false);}
+        } catch(reason){if(!disposed&&requestId===reverseRequest.current){setSelection(null);setError(reason.message);}} finally{if(!disposed&&requestId===reverseRequest.current)setLoading(false);}
       }
       map.on('click',event=>choosePoint(event.latlng)); marker.on('dragend',()=>choosePoint(marker.getLatLng()));
       if(hasPoint){
@@ -55,7 +57,7 @@ export default function LocationPinModal({marketCode,latitude,longitude,address=
       setTimeout(()=>{if(!disposed)map.invalidateSize();},0);
     }
     initialize();
-    return()=>{disposed=true;if(mapInstance.current){mapInstance.current.remove();mapInstance.current=null;markerInstance.current=null;}};
+    return()=>{disposed=true;reverseRequest.current+=1;if(mapInstance.current){mapInstance.current.remove();mapInstance.current=null;markerInstance.current=null;}};
   },[marketCode,latitude,longitude,address,initialLocation?.city,initialLocation?.barangay,initialLocation?.house_number]);
 
   useEffect(()=>{
@@ -84,9 +86,10 @@ export default function LocationPinModal({marketCode,latitude,longitude,address=
   },[query,dirty,marketCode,latitude,longitude]);
 
   function chooseSuggestion(suggestion){
+    reverseRequest.current+=1;
     const point=[Number(suggestion.latitude),Number(suggestion.longitude)];
     markerInstance.current?.setLatLng(point);mapInstance.current?.setView(point,17);
-    setSelection(suggestion);setQuery(suggestion.formatted||suggestion.house_number||query);setSuggestions([]);setDirty(false);setError('');
+    setSelection(suggestion);setQuery(suggestion.formatted||suggestion.house_number||query);setSuggestions([]);setDirty(false);setLoading(false);setError('');
   }
   async function searchAddress(event){
     event.preventDefault();setError('');
